@@ -142,7 +142,9 @@ tbody tr.click{cursor:pointer}tbody tr.click:hover{background:#fafaf8}
 .mhead{display:flex;gap:10px;align-items:center;margin-bottom:4px}
 .mlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:2px 10px}
 .mchk{display:flex;align-items:center;gap:6px;font-size:13px;min-height:28px;cursor:pointer}
-.mchk input,.chip input{height:auto}
+.mchk input,.chip input{width:16px;height:16px;padding:0;margin:0;flex:none;min-width:16px}
+.mchk{justify-content:flex-start}
+button.link{background:none;border:0;padding:0 2px;font:inherit;height:auto}
 .chip{height:34px;padding:0 12px;border-radius:9px;border:1px solid var(--line);background:var(--card);cursor:pointer;font-weight:600;font-size:13px}
 .chip.on{background:#111;color:#fff;border-color:#111}
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;z-index:20}
@@ -1044,7 +1046,7 @@ function kindEditor(box, p, getImages) {
   const draw = async () => {
     const K = KINDS[st.kind]; const o = K.opt; const imgs = getImages();
     const all = K.models ? [...new Set([...(await knownModels()), ...st.models])].sort(modelSort) : [];
-    const photoSel = (v, i) => `<select data-o="img" data-i="${i}" style="width:84px"><option value="">—</option>${imgs.map((_, k) => `<option value="${k}" ${v === k ? 'selected' : ''}>фото ${k + 1}</option>`).join('')}</select>`;
+    const photoSel = (v, i) => `<select data-o="img" data-i="${i}" style="width:104px"><option value="">—</option>${imgs.map((_, k) => `<option value="${k}" ${v === k ? 'selected' : ''}>фото ${k + 1}</option>`).join('')}</select>`;
     const spec = (f) => {
       const v = st.specs[f.k];
       if (f.type === 'number') return `<label class="f">${f.label}<input type="number" step="any" data-s="${f.k}" value="${v ?? ''}"></label>`;
