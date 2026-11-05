@@ -215,11 +215,13 @@ const money = (v) => Math.round(Number(v || 0)).toLocaleString('ru-RU').replace(
 const dt = (v) => new Date(v).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 /** "Чёрный | #151515 | 1" lines → [{key,name:{ru,uz,ky},hex,img}] (keeps existing translations for the same name) */
 function parseColors(text, old) {
-  return text.split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((a) => a[0]).map(([nm, hex, ph]) => {
+  return text.split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((a) => a[0]).map(([nm, hex, ph, models]) => {
     const prev = old.find((c) => (c.name?.ru || c.key) === nm);
-    const h = /^#?[0-9a-f]{6}$/i.test(hex || '') ? (hex.startsWith('#') ? hex : '#' + hex) : (prev?.hex || '#999999');
-    const c = { key: prev?.key || nm.toLowerCase().replace(/[^a-zа-я0-9]+/gi, '-'), name: prev?.name || { ru: nm, uz: nm, ky: nm }, hex: h };
+    const c = { key: prev?.key || nm.toLowerCase().replace(/[^a-zа-я0-9]+/gi, '-'), name: prev?.name || { ru: nm, uz: nm, ky: nm } };
+    if (/^#?[0-9a-f]{6}$/i.test(hex || '')) c.hex = hex.startsWith('#') ? hex : '#' + hex;
     if (Number(ph) > 0) c.img = Number(ph) - 1;
+    const ms = String(models || '').split(';').map((x) => x.trim()).filter(Boolean);
+    if (ms.length) c.models = ms;
     return c;
   });
 }
@@ -969,8 +971,9 @@ async function openProduct(id, catId, copyFrom) {
     <label class="f">Сортировка<input name="sort" type="number" value="${p.sort}"></label>
     <label class="f">Метки<span class="chips"><label class="chip"><input type="checkbox" name="is_new" ${p.is_new ? 'checked' : ''}> NEW</label><label class="chip"><input type="checkbox" name="is_hit" ${p.is_hit ? 'checked' : ''}> HIT</label><label class="chip"><input type="checkbox" name="is_active" ${p.is_active ? 'checked' : ''}> В продаже</label></span></label>
     <label class="f" style="grid-column:1/-1">Подходит для моделей (через запятую) — для чехлов и стёкол<input name="models" value="${esc((p.compatible_models || []).join(', '))}" placeholder="iPhone 15 Pro, Samsung Galaxy S25, Redmi Note 14"></label>
-    <label class="f" style="grid-column:1/-1">Цвета (каждый с новой строки: Название | #цвет | № фото)
-      <textarea name="colors" rows="3" placeholder="Чёрный | #151515 | 1&#10;Синий | #24448A | 2">${esc((p.colors || []).map((c) => [c.name?.ru || c.key, c.hex, c.img != null ? c.img + 1 : ''].join(' | ').replace(/ \| $/, '')).join('\n'))}</textarea></label>
+    <label class="f">Заголовок вариантов<input name="opt_title" value="${esc(p.option_title?.ru || '')}" placeholder="Цвет / Тип стекла / Цвет кольца"></label>
+    <label class="f" style="grid-column:1/-1">Варианты (каждый с новой строки: Название | #цвет | № фото | модели через ;). Цвет можно не писать — тогда будет кнопка (HD, Privacy…)
+      <textarea name="colors" rows="4" placeholder="Чёрный | #151515 | 1&#10;Privacy |  | 2 | iPhone 16; iPhone 17 Pro">${esc((p.colors || []).map((c) => [c.name?.ru || c.key, c.hex || '', c.img != null ? c.img + 1 : '', (c.models || []).join('; ')].join(' | ').replace(/( \| )+$/, '')).join('\n'))}</textarea></label>
     <label class="f" style="grid-column:1/-1">Описание (RU)<textarea name="d_ru" rows="2">${esc(p.description?.ru)}</textarea></label>
     <label class="f">Tavsif (UZ)<textarea name="d_uz" rows="2">${esc(p.description?.uz)}</textarea></label>
     <label class="f">Сүрөттөмө (KY)<textarea name="d_ky" rows="2">${esc(p.description?.ky)}</textarea></label>
@@ -1020,6 +1023,7 @@ async function openProduct(id, catId, copyFrom) {
         sort: Number(f.get('sort') || 0), is_new: !!f.get('is_new'), is_hit: !!f.get('is_hit'), is_active: active,
         compatible_models: String(f.get('models') || '').split(',').map((s) => s.trim()).filter(Boolean),
         colors: parseColors(String(f.get('colors') || ''), p.colors || []),
+        option_title: String(f.get('opt_title') || '').trim() ? (() => { const v = String(f.get('opt_title')).trim(); return p.option_title?.ru === v ? p.option_title : { ru: v, uz: v, ky: v }; })() : null,
       };
       let pid = id;
       if (id) await q(sb.from('products').update(row).eq('id', id));
