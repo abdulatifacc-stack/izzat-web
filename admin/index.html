@@ -136,6 +136,13 @@ tbody tr.click{cursor:pointer}tbody tr.click:hover{background:#fafaf8}
 .vr{margin-top:3px;font-weight:700;color:#C2410C;font-size:13px}
 .muted{color:var(--ink2)}.small{font-size:13px}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
+.hintBox{background:var(--brandSoft);color:var(--ink);border-radius:10px;padding:10px 12px;font-size:13px;line-height:1.45}
+.kindHead{display:flex;align-items:center;gap:8px}
+.mbox{border:1px solid var(--line);border-radius:12px;padding:10px;max-height:340px;overflow:auto;display:flex;flex-direction:column;gap:10px;background:var(--card)}
+.mhead{display:flex;gap:10px;align-items:center;margin-bottom:4px}
+.mlist{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:2px 10px}
+.mchk{display:flex;align-items:center;gap:6px;font-size:13px;min-height:28px;cursor:pointer}
+.mchk input,.chip input{height:auto}
 .chip{height:34px;padding:0 12px;border-radius:9px;border:1px solid var(--line);background:var(--card);cursor:pointer;font-weight:600;font-size:13px}
 .chip.on{background:#111;color:#fff;border-color:#111}
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.45);display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto;z-index:20}
@@ -884,12 +891,12 @@ function priceGrid(base) { return [{ price_type_id: 1, min_qty: 1, price: Math.r
 VIEWS.products = async () => {
   $('#main').innerHTML = `<h1>Товары</h1>
   <div class="bar"><input id="pq" class="grow" placeholder="Поиск: название, артикул, штрихкод" value="${esc(prodSearch)}">
-    <select id="pc"><option value="">Все категории</option>${CATS.map((c) => `<option value="${c.id}" ${prodCat === c.id ? 'selected' : ''}>${esc(L(c.name))}</option>`).join('')}</select>
+    <select id="pc"><option value="">Все категории</option>${catOptions(prodCat)}</select>
     <button class="btn ghost" id="bulkPhotos">📷 Фото пачкой</button><button class="btn ghost" id="quickAdd">⚡ Быстрое добавление</button><button class="btn" id="addP">+ Новый товар</button></div>
   <div class="bar"><div class="chips" id="pf"></div></div>
   <div class="bar hidden" id="bulkBar" style="background:#111;color:#fff;padding:10px 12px;border-radius:12px"><b id="selN"></b><span class="grow"></span>
     <button class="btn sm" data-bulk="on">Включить продажу</button><button class="btn sm ghost" style="color:#fff;border-color:#666" data-bulk="off">Скрыть</button>
-    <button class="btn sm ghost" style="color:#fff;border-color:#666" data-bulk="new">NEW вкл/выкл</button><select id="moveCat" style="height:32px"><option value="">Перенести в…</option>${CATS.map((c) => `<option value="${c.id}">${esc(L(c.name))}</option>`).join('')}</select></div>
+    <button class="btn sm ghost" style="color:#fff;border-color:#666" data-bulk="new">NEW вкл/выкл</button><select id="moveCat" style="height:32px"><option value="">Перенести в…</option>${catOptions('')}</select></div>
   <div class="tbl-wrap"><table><thead><tr><th><input type="checkbox" id="selAll" aria-label="Выбрать все"></th><th></th><th>Товар</th><th>Арт. / штрихкод</th><th>Категория</th><th class="num">Цена</th><th class="num">Остаток</th><th>В продаже</th></tr></thead><tbody id="pb"><tr><td colspan="10" class="empty">Загрузка…</td></tr></tbody></table></div>`;
   let rows = []; const sel = new Set();
   const flags = (p) => ({ active: p.is_active, hidden: !p.is_active, nophoto: !(p.product_images || []).length, noprice: !(p.product_prices || []).length, nostock: p.stock <= 0, low: p.stock > 0 && p.stock <= 10, all: true });
@@ -938,8 +945,8 @@ VIEWS.products = async () => {
   $('#moveCat').onchange = (e) => { if (e.target.value) bulk({ category_id: e.target.value }, 'Перенесено'); };
   let h; $('#pq').oninput = (e) => { clearTimeout(h); h = setTimeout(() => { prodSearch = e.target.value.trim(); load(); }, 300); };
   $('#pc').onchange = (e) => { prodCat = e.target.value; load(); };
-  $('#addP').onclick = () => openProduct(null, prodCat || CATS[0]?.id);
-  $('#quickAdd').onclick = () => quickAdd(prodCat || CATS[0]?.id);
+  $('#addP').onclick = () => openProduct(null, prodCat || CATS.find((c) => !isGroupCat(c))?.id);
+  $('#quickAdd').onclick = () => quickAdd(prodCat || CATS.find((c) => !isGroupCat(c))?.id);
   $('#bulkPhotos').onclick = () => bulkPhotos();
   load();
 };
@@ -952,6 +959,189 @@ async function uploadImage(file, prefix = 'p') {
   if (error) { toast(error.message, true); return null; }
   return path;
 }
+
+/* ---------------- category kinds: which fields a product of this category needs ----------------
+ * The kind is set on the category (Категории → «Тип товаров»). The product form then shows only
+ * what matters: a case asks for phone models and colors, a cable for plug type / watts / length,
+ * a flash drive for capacities with their own prices, and so on.
+ */
+const KINDS = {
+  case: { name: 'Чехлы', models: true, opt: { title: 'Цвет', hex: true, models: true, price: false, need: true },
+    hint: '1) Отметьте модели телефонов. 2) Добавьте цвета (кружок цвета + номер фото). Если какой-то цвет есть не для всех моделей — нажмите «Модели» в его строке и снимите лишние.' },
+  glass: { name: 'Защитные стёкла', models: true, opt: { title: 'Тип стекла', hex: false, models: true, price: true, need: true, presets: ['HD (прозрачное)', 'Privacy (антишпион)', 'Матовое', 'Керамика', '9D (на весь экран)', 'Full Glue'] },
+    hint: 'Один бренд = один товар. Внутри — типы (HD, Privacy…): у каждого своё фото, своя цена и свой список моделей. Модели, которых нет у типа, клиент увидит как «нет».' },
+  lens: { name: 'Защита камеры', models: true, opt: { title: 'Цвет кольца', hex: true, models: true, price: false, need: true },
+    hint: 'Клиент сначала выбирает модель телефона, потом цвета. Отметьте модели и добавьте цвета колец (у цвета можно ограничить модели).' },
+  cable: { name: 'Кабели', opt: { title: 'Разъём', hex: false, models: false, price: true, presets: ['Lightning (iPhone)', 'Type-C', 'Micro-USB'] },
+    specs: [
+      { k: 'conn', label: 'Разъём (откуда → куда)', type: 'multi', opts: ['USB-A → Lightning', 'USB-A → Type-C', 'USB-A → Micro', 'Type-C → Lightning', 'Type-C → Type-C'] },
+      { k: 'w', label: 'Мощность, W', type: 'number' }, { k: 'len', label: 'Длина, м', type: 'select', opts: ['0.25', '0.5', '1', '1.2', '1.5', '2', '3'] }],
+    hint: 'Обязательно укажите разъём и мощность — по ним клиент фильтрует, и к зарядкам автоматически подбираются подходящие кабели. Если одна модель кабеля бывает с разными штекерами — добавьте варианты (Lightning / Type-C / Micro).' },
+  charger: { name: 'Зарядки', opt: { title: 'Цвет', hex: true, models: false, price: false },
+    specs: [{ k: 'w', label: 'Мощность, W', type: 'number' }, { k: 'ports', label: 'Порты', type: 'select', opts: ['USB-A', '2×USB-A', 'Type-C', '2×Type-C', 'Type-C + USB-A', '3+ USB'] },
+      { k: 'kit', label: 'Кабель в комплекте', type: 'check' }],
+    hint: 'Порты и мощность — главное: клиент ищет «головку 20W Type-C», и в карточке покажем подходящие кабели.' },
+  powerbank: { name: 'Power Bank', opt: { title: 'Цвет', hex: true, models: false, price: false },
+    specs: [{ k: 'cap', label: 'Ёмкость, мАч', type: 'number' }, { k: 'w', label: 'Мощность, W', type: 'number' }, { k: 'magsafe', label: 'MagSafe (магнитный)', type: 'check' }, { k: 'builtin', label: 'Встроенный кабель', type: 'check' }] },
+  audio: { name: 'Наушники', opt: { title: 'Цвет', hex: true, models: false, price: false },
+    specs: [{ k: 'type', label: 'Тип', type: 'select', opts: [['tws', 'Беспроводные TWS'], ['over', 'Накладные'], ['wired', 'Проводные']] }, { k: 'anc', label: 'Шумоподавление ANC', type: 'check' }] },
+  holder: { name: 'Автодержатели', opt: { title: 'Цвет', hex: true, models: false, price: false },
+    specs: [{ k: 'mount', label: 'Крепление', type: 'select', opts: [['vent', 'В дефлектор'], ['dash', 'На панель'], ['magnet', 'Магнитный (MagSafe)'], ['desk', 'Настольный']] }, { k: 'wireless', label: 'Беспроводная зарядка', type: 'check' }] },
+  memory: { name: 'Флешки и карты', opt: { title: 'Объём', hex: false, models: false, price: true, need: true, presets: ['16 GB', '32 GB', '64 GB', '128 GB', '256 GB', '512 GB', '1 TB'] },
+    specs: [{ k: 'type', label: 'Тип', type: 'select', opts: [['usb', 'USB-флешка'], ['microsd', 'microSD']] }],
+    hint: 'Каждый объём — отдельный вариант со своей ценой. Клиент нажимает 64 GB / 128 GB — цена и фото меняются.' },
+  scent: { name: 'Ароматизаторы', opt: { title: 'Аромат', hex: false, models: false, price: false, need: true } },
+  generic: { name: 'Обычные товары', opt: { title: 'Цвет', hex: true, models: false, price: false } },
+};
+/* uz / ky for standard titles and preset names (anything else is copied from RU; edit translations later if needed) */
+const TR = {
+  'Цвет': ['Rang', 'Түс'], 'Тип стекла': ['Oyna turi', 'Айнектин түрү'], 'Цвет кольца': ['Halqa rangi', 'Шакекченин түсү'], 'Разъём': ['Razyom', 'Туташтыргыч'],
+  'Объём': ['Hajm', 'Көлөмү'], 'Аромат': ['Hid', 'Жыты'], 'HD (прозрачное)': ['HD (shaffof)', 'HD (тунук)'], 'Privacy (антишпион)': ['Privacy (antishpion)', 'Privacy (антишпион)'],
+  'Матовое': ['Matli', 'Күңүрт'], 'Керамика': ['Keramika', 'Керамика'], '9D (на весь экран)': ['9D (butun ekran)', '9D (бүт экран)'],
+  'Чёрный': ['Qora', 'Кара'], 'Белый': ['Oq', 'Ак'], 'Синий': ['Ko‘k', 'Көк'], 'Красный': ['Qizil', 'Кызыл'], 'Зелёный': ['Yashil', 'Жашыл'], 'Серый': ['Kulrang', 'Боз'],
+  'Розовый': ['Pushti', 'Кызгылт'], 'Фиолетовый': ['Binafsha', 'Кызгылт көк'], 'Золото': ['Oltin', 'Алтын'], 'Серебро': ['Kumush', 'Күмүш'], 'Прозрачный': ['Shaffof', 'Тунук'],
+};
+const L3 = (ru) => ({ ru, uz: TR[ru]?.[0] || ru, ky: TR[ru]?.[1] || ru });
+const kindOfCat = (catId) => KINDS[CATS.find((c) => c.id === catId)?.template?.kind] ? CATS.find((c) => c.id === catId).template.kind : 'generic';
+const isGroupCat = (c) => !!c?.template?.group;
+/** <option>s of real categories, grouped like the client catalog */
+function catOptions(sel) {
+  const groups = CATS.filter(isGroupCat).sort((a, b) => a.sort - b.sort);
+  const leaves = CATS.filter((c) => !isGroupCat(c));
+  const opt = (c) => `<option value="${c.id}" ${c.id === sel ? 'selected' : ''}>${esc(L(c.name))}</option>`;
+  const loose = leaves.filter((c) => !groups.some((g) => g.id === c.parent_id));
+  return groups.map((g) => `<optgroup label="${esc(L(g.name))}">${leaves.filter((c) => c.parent_id === g.id).sort((a, b) => a.sort - b.sort).map(opt).join('')}</optgroup>`).join('') + loose.map(opt).join('');
+}
+const phoneBrand = (m) => /^iPhone/i.test(m) ? 'iPhone' : /^Samsung|^Galaxy/i.test(m) ? 'Samsung' : /^(Redmi|Xiaomi|Poco)/i.test(m) ? 'Redmi / Xiaomi' : 'Другие';
+const modelSort = (a, b) => a.localeCompare(b, 'ru', { numeric: true });
+let KNOWN_MODELS = null;
+async function knownModels() {
+  if (KNOWN_MODELS) return KNOWN_MODELS;
+  const rows = await q(sb.from('products').select('compatible_models').limit(5000));
+  KNOWN_MODELS = [...new Set(rows.flatMap((r) => r.compatible_models || []))].filter((m) => /\d/.test(m)).sort(modelSort);
+  return KNOWN_MODELS;
+}
+function modelChecks(all, picked, name) {
+  const by = {}; all.forEach((m) => { (by[phoneBrand(m)] ||= []).push(m); });
+  return Object.entries(by).map(([b, ms]) => `<div class="mgrp"><div class="mhead"><b>${esc(b)}</b> <button type="button" class="link small" data-allb="${esc(b)}">все</button> <button type="button" class="link small" data-noneb="${esc(b)}">снять</button></div>
+    <div class="mlist">${ms.map((m) => `<label class="mchk"><input type="checkbox" name="${name}" value="${esc(m)}" data-b="${esc(b)}" ${picked.includes(m) ? 'checked' : ''}> ${esc(m.replace(/^Samsung Galaxy /, 'Galaxy '))}</label>`).join('')}</div></div>`).join('');
+}
+
+/**
+ * Renders the kind-specific part of the product form into `box` and returns { collect() }.
+ * getImages() → current photo list (to offer "photo №" choices for options).
+ */
+function kindEditor(box, p, getImages) {
+  const st = {
+    kind: kindOfCat(p.category_id),
+    models: [...(p.compatible_models || [])],
+    opts: (p.colors || []).map((c) => ({ ...c, models: c.models ? [...c.models] : undefined })),
+    title: p.option_title?.ru || '',
+    titleL: p.option_title || null,
+    specs: { ...(p.specs || {}) },
+    openRow: null, pickModels: false,
+  };
+  const draw = async () => {
+    const K = KINDS[st.kind]; const o = K.opt; const imgs = getImages();
+    const all = K.models ? [...new Set([...(await knownModels()), ...st.models])].sort(modelSort) : [];
+    const photoSel = (v, i) => `<select data-o="img" data-i="${i}" style="width:84px"><option value="">—</option>${imgs.map((_, k) => `<option value="${k}" ${v === k ? 'selected' : ''}>фото ${k + 1}</option>`).join('')}</select>`;
+    const spec = (f) => {
+      const v = st.specs[f.k];
+      if (f.type === 'number') return `<label class="f">${f.label}<input type="number" step="any" data-s="${f.k}" value="${v ?? ''}"></label>`;
+      if (f.type === 'check') return `<label class="chip" style="align-self:end;height:40px;display:flex;align-items:center;gap:6px"><input type="checkbox" data-s="${f.k}" ${v ? 'checked' : ''}> ${f.label}</label>`;
+      if (f.type === 'select') return `<label class="f">${f.label}<select data-s="${f.k}"><option value="">—</option>${f.opts.map((x) => { const [val, lab] = Array.isArray(x) ? x : [x, x]; return `<option value="${esc(val)}" ${String(v ?? '') === val ? 'selected' : ''}>${esc(lab)}</option>`; }).join('')}</select></label>`;
+      const arr = Array.isArray(v) ? v : v ? [v] : [];
+      return `<div class="f" style="grid-column:1/-1">${f.label}<div class="chips">${f.opts.map((x) => `<label class="chip" style="display:flex;align-items:center;gap:6px"><input type="checkbox" data-sm="${f.k}" value="${esc(x)}" ${arr.includes(x) ? 'checked' : ''}> ${esc(x)}</label>`).join('')}</div></div>`;
+    };
+    box.innerHTML = `
+      <div class="kindHead"><span class="pill p-brand">${esc(K.name)}</span> <span class="small muted">тип задаётся в категории</span></div>
+      ${K.hint ? `<div class="hintBox">${esc(K.hint)}</div>` : ''}
+      ${K.specs ? `<h3>Характеристики</h3><div class="cols">${K.specs.map(spec).join('')}</div>` : ''}
+      ${K.models ? `<h3>Модели телефонов <span class="small muted">— выбрано ${st.models.length}</span></h3>
+        <div class="chips" id="mChips">${st.models.slice().sort(modelSort).map((m) => `<span class="chip on" style="display:inline-flex;align-items:center;gap:4px">${esc(m.replace(/^Samsung Galaxy /, 'Galaxy '))}<button type="button" class="link" data-mdel="${esc(m)}" aria-label="Убрать">×</button></span>`).join('') || '<span class="small muted">пока не выбрано</span>'}</div>
+        <div class="bar" style="margin:6px 0"><input id="mAdd" class="grow" list="mList" placeholder="Добавить модель: iPhone 17 Pro, Galaxy S26… (можно через запятую)"><datalist id="mList">${all.map((m) => `<option value="${esc(m)}">`).join('')}</datalist>
+          <button type="button" class="btn sm ghost" id="mAddBtn">Добавить</button><button type="button" class="btn sm ${st.pickModels ? '' : 'ghost'}" id="mPick">${st.pickModels ? 'Готово' : 'Выбрать из списка'}</button></div>
+        ${st.pickModels ? `<div class="mbox">${modelChecks(all, st.models, 'pm')}</div>` : ''}` : ''}
+      ${o ? `<h3>${o.need ? 'Варианты' : 'Варианты <span class="small muted">(если нужно — например цвета)</span>'}</h3>
+        <div class="bar" style="margin:0 0 6px"><label class="f" style="flex-direction:row;align-items:center;gap:8px">Заголовок<input id="oTitle" value="${esc(st.title || o.title)}" style="width:200px"></label>
+          ${(o.presets || []).map((x) => `<button type="button" class="chip" data-preset="${esc(x)}">+ ${esc(x)}</button>`).join('')}</div>
+        <div class="tbl-wrap"><table class="tiers"><thead><tr><th>Название</th>${o.hex ? '<th>Цвет</th>' : ''}<th>Фото</th>${o.price ? '<th>Цена, с</th>' : ''}${o.models ? '<th>Модели</th>' : ''}<th></th></tr></thead><tbody>
+        ${st.opts.map((c, i) => `<tr><td><input data-o="name" data-i="${i}" value="${esc(c.name?.ru || '')}" placeholder="${o.hex ? 'Чёрный' : o.title}"></td>
+          ${o.hex ? `<td><input type="color" data-o="hex" data-i="${i}" value="${esc(c.hex || '#111111')}" style="width:48px;padding:2px"></td>` : ''}
+          <td>${photoSel(c.img, i)}</td>
+          ${o.price ? `<td><input type="number" data-o="price" data-i="${i}" value="${c.price ?? ''}" placeholder="как у товара" style="width:120px"></td>` : ''}
+          ${o.models ? `<td><button type="button" class="btn sm ghost" data-mrow="${i}">${c.models?.length ? `${c.models.length} из ${st.models.length}` : 'все модели'}</button></td>` : ''}
+          <td><button type="button" class="link" data-odel="${i}" aria-label="Удалить вариант">×</button></td></tr>
+          ${o.models && st.openRow === i ? `<tr><td colspan="6"><div class="small muted" style="margin-bottom:4px">Для каких моделей есть «${esc(c.name?.ru || '')}»? Снимите галочку — клиент увидит «нет».</div><div class="mbox">${modelChecks(st.models.slice().sort(modelSort), c.models?.length ? c.models : st.models, 'rm')}</div></td></tr>` : ''}`).join('')}
+        </tbody></table></div>
+        <button type="button" class="btn sm ghost" id="oAdd" style="margin-top:6px">+ Вариант</button>` : ''}`;
+
+    const sync = () => {
+      box.querySelectorAll('[data-o]').forEach((i) => {
+        const c = st.opts[Number(i.dataset.i)]; if (!c) return;
+        if (i.dataset.o === 'name') c.name = c.name?.ru === i.value ? c.name : L3(i.value);
+        if (i.dataset.o === 'hex') c.hex = i.value;
+        if (i.dataset.o === 'img') c.img = i.value === '' ? undefined : Number(i.value);
+        if (i.dataset.o === 'price') c.price = i.value === '' ? undefined : Number(i.value);
+      });
+      box.querySelectorAll('[data-s]').forEach((i) => { st.specs[i.dataset.s] = i.type === 'checkbox' ? i.checked : i.type === 'number' ? (i.value === '' ? null : Number(i.value)) : i.value || null; });
+      const multi = {}; box.querySelectorAll('[data-sm]').forEach((i) => { (multi[i.dataset.sm] ||= []); if (i.checked) multi[i.dataset.sm].push(i.value); });
+      Object.entries(multi).forEach(([k, v]) => { st.specs[k] = v.length === 1 ? v[0] : v.length ? v : null; });
+      if (box.querySelector('#oTitle')) st.title = box.querySelector('#oTitle').value.trim();
+      if (st.pickModels) st.models = [...box.querySelectorAll('input[name=pm]:checked')].map((i) => i.value);
+      if (st.openRow != null && st.opts[st.openRow]) {
+        const ch = [...box.querySelectorAll('input[name=rm]')]; if (ch.length) { const on = ch.filter((i) => i.checked).map((i) => i.value); st.opts[st.openRow].models = on.length === ch.length ? undefined : on; }
+      }
+    };
+    box.oninput = box.onchange = (e) => { if (e.target.matches('input[name=pm]')) { sync(); return; } sync(); };
+    box.querySelectorAll('[data-allb],[data-noneb]').forEach((b) => b.onclick = () => {
+      const brand = b.dataset.allb || b.dataset.noneb; b.closest('.mbox').querySelectorAll(`input[data-b="${CSS.escape(brand)}"]`).forEach((i) => { i.checked = !!b.dataset.allb; }); sync(); draw();
+    });
+    box.querySelectorAll('[data-mdel]').forEach((b) => b.onclick = () => { sync(); st.models = st.models.filter((m) => m !== b.dataset.mdel); st.opts.forEach((c) => { if (c.models) c.models = c.models.filter((m) => m !== b.dataset.mdel); }); draw(); });
+    const addTyped = () => { sync(); const v = box.querySelector('#mAdd').value; v.split(',').map((s) => s.trim()).filter(Boolean).forEach((m) => { const fixed = m.replace(/^Galaxy /i, 'Samsung Galaxy '); if (!st.models.includes(fixed)) st.models.push(fixed); }); draw(); };
+    box.querySelector('#mAddBtn') && (box.querySelector('#mAddBtn').onclick = addTyped);
+    box.querySelector('#mAdd') && (box.querySelector('#mAdd').onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); addTyped(); } });
+    box.querySelector('#mPick') && (box.querySelector('#mPick').onclick = () => { sync(); st.pickModels = !st.pickModels; draw(); });
+    box.querySelectorAll('[data-mrow]').forEach((b) => b.onclick = () => { sync(); const i = Number(b.dataset.mrow); st.openRow = st.openRow === i ? null : i; draw(); });
+    box.querySelectorAll('[data-odel]').forEach((b) => b.onclick = () => { sync(); st.opts.splice(Number(b.dataset.odel), 1); st.openRow = null; draw(); });
+    box.querySelectorAll('[data-preset]').forEach((b) => b.onclick = () => { sync(); const v = b.dataset.preset; if (!st.opts.some((c) => c.name?.ru === v)) st.opts.push({ key: '', name: L3(v) }); draw(); });
+    box.querySelector('#oAdd') && (box.querySelector('#oAdd').onclick = () => { sync(); st.opts.push({ key: '', name: { ru: '', uz: '', ky: '' }, hex: KINDS[st.kind].opt?.hex ? '#111111' : undefined }); draw(); });
+  };
+  draw();
+  return {
+    redraw: draw,
+    setCategory(catId) { st.kind = kindOfCat(catId); st.openRow = null; draw(); },
+    /** → { compatible_models, colors, option_title, specs } or a string error */
+    collect() {
+      const K = KINDS[st.kind];
+      box.dispatchEvent(new Event('input'));
+      const opts = st.opts.filter((c) => (c.name?.ru || '').trim());
+      if (K.models && !st.models.length) return 'Выберите хотя бы одну модель телефона';
+      if (K.opt?.need && !opts.length) return `Добавьте хотя бы один вариант (${K.opt.title.toLowerCase()})`;
+      const used = new Set();
+      const colors = opts.map((c) => {
+        const ru = c.name.ru.trim();
+        let key = c.key || ru.toLowerCase().replace(/[^a-zа-я0-9]+/gi, '-').replace(/^-|-$/g, '') || 'v';
+        while (used.has(key)) key += '-2'; used.add(key);
+        const out = { key, name: c.name.ru === ru ? c.name : L3(ru) };
+        if (K.opt.hex && c.hex) out.hex = c.hex;
+        if (c.img != null) out.img = c.img;
+        if (K.opt.price && c.price) out.price = c.price;
+        if (K.opt.models && c.models?.length) out.models = c.models.filter((m) => st.models.includes(m));
+        return out;
+      });
+      const title = st.title || K.opt?.title || '';
+      const specs = {}; (K.specs || []).forEach((f) => { const v = st.specs[f.k]; if (v != null && v !== '' && v !== false && !(Array.isArray(v) && !v.length)) specs[f.k] = v; });
+      return {
+        compatible_models: K.models ? st.models : [],
+        colors,
+        option_title: colors.length ? (st.titleL?.ru === title ? st.titleL : L3(title)) : null,
+        specs,
+      };
+    },
+  };
+}
+
 
 async function openProduct(id, catId, copyFrom) {
   let p;
@@ -966,7 +1156,7 @@ async function openProduct(id, catId, copyFrom) {
   modal(`<div class="head"><h2>${id ? esc(L(p.name)) : copyFrom ? 'Копия товара' : 'Новый товар'}</h2><button class="x" data-close aria-label="Закрыть">×</button></div>
   ${!id ? '<div class="small muted">Поля заполнены по шаблону категории. Товар создаётся скрытым — включите продажу, когда проверите цены и фото.</div>' : ''}
   <form id="pf" class="cols">
-    <label class="f">Категория<select name="category_id" id="pcat">${CATS.map((c) => `<option value="${c.id}" ${c.id === p.category_id ? 'selected' : ''}>${esc(L(c.name))}</option>`).join('')}</select></label>
+    <label class="f">Категория<select name="category_id" id="pcat">${catOptions(p.category_id)}</select></label>
     <label class="f">Название (RU) *<input name="ru" required value="${esc(p.name.ru)}"></label>
     <label class="f">Nomi (UZ)<input name="uz" value="${esc(p.name.uz)}" placeholder="как RU, если пусто"></label>
     <label class="f">Аталышы (KY)<input name="ky" value="${esc(p.name.ky)}" placeholder="как RU, если пусто"></label>
@@ -980,10 +1170,7 @@ async function openProduct(id, catId, copyFrom) {
     <label class="f">В упаковке, шт<input name="pack_qty" type="number" min="1" value="${p.pack_qty}"></label>
     <label class="f">Сортировка<input name="sort" type="number" value="${p.sort}"></label>
     <label class="f">Метки<span class="chips"><label class="chip"><input type="checkbox" name="is_new" ${p.is_new ? 'checked' : ''}> NEW</label><label class="chip"><input type="checkbox" name="is_hit" ${p.is_hit ? 'checked' : ''}> HIT</label><label class="chip"><input type="checkbox" name="is_active" ${p.is_active ? 'checked' : ''}> В продаже</label></span></label>
-    <label class="f" style="grid-column:1/-1">Подходит для моделей (через запятую) — для чехлов и стёкол<input name="models" value="${esc((p.compatible_models || []).join(', '))}" placeholder="iPhone 15 Pro, Samsung Galaxy S25, Redmi Note 14"></label>
-    <label class="f">Заголовок вариантов<input name="opt_title" value="${esc(p.option_title?.ru || '')}" placeholder="Цвет / Тип стекла / Цвет кольца"></label>
-    <label class="f" style="grid-column:1/-1">Варианты (каждый с новой строки: Название | #цвет | № фото | модели через ; | цена). Цвет можно не писать — тогда будет кнопка (HD, Privacy…). Цена — если у варианта своя цена (иначе общая)
-      <textarea name="colors" rows="4" placeholder="Чёрный | #151515 | 1&#10;Privacy |  | 2 | iPhone 16; iPhone 17 Pro | 850&#10;512 GB |  | 4 |  | 2900">${esc((p.colors || []).map((c) => [c.name?.ru || c.key, c.hex || '', c.img != null ? c.img + 1 : '', (c.models || []).join('; '), c.price || ''].join(' | ').replace(/( \| )+$/, '')).join('\n'))}</textarea></label>
+    <div id="kindBox" style="grid-column:1/-1;display:flex;flex-direction:column;gap:8px"></div>
     <label class="f" style="grid-column:1/-1">Описание (RU)<textarea name="d_ru" rows="2">${esc(p.description?.ru)}</textarea></label>
     <label class="f">Tavsif (UZ)<textarea name="d_uz" rows="2">${esc(p.description?.uz)}</textarea></label>
     <label class="f">Сүрөттөмө (KY)<textarea name="d_ky" rows="2">${esc(p.description?.ky)}</textarea></label>
@@ -998,7 +1185,7 @@ async function openProduct(id, catId, copyFrom) {
   <div class="bar" style="margin:0;justify-content:space-between">${id ? '<button class="btn ghost" id="copyP" type="button">Копировать товар</button>' : '<span></span>'}<div class="bar" style="margin:0"><button class="btn ghost" data-close>Отмена</button><button class="btn" id="saveP">Сохранить</button></div></div>`,
   (el, close) => {
     let dragK = null;
-    const drawImgs = () => {
+    let drawImgs = () => {
       $('#imgs', el).innerHTML = images.map((u, k) => `<div class="im" draggable="true" data-i="${k}"><img src="${img(u)}" alt="">${k === 0 ? '<span class="pill p-brand" style="position:absolute;left:4px;bottom:4px">главное</span>' : ''}<button type="button" data-k="${k}" aria-label="Удалить">×</button></div>`).join('') || '<div class="muted small">Нет фото — клиент увидит заглушку</div>';
       $('#imgs', el).querySelectorAll('[data-k]').forEach((b) => b.onclick = () => { images.splice(Number(b.dataset.k), 1); drawImgs(); });
       $('#imgs', el).querySelectorAll('[data-i]').forEach((d) => {
@@ -1008,6 +1195,8 @@ async function openProduct(id, catId, copyFrom) {
       });
     };
     drawImgs();
+    const kb = kindEditor($('#kindBox', el), p, () => images);
+    const drawImgs0 = drawImgs; drawImgs = () => { drawImgs0(); kb.redraw(); };
 
     if (images.length >= 5) toast('Совет: 4–5 фото достаточно — первое главное');
     const addFiles = async (files) => { for (const f of files) { const path = await uploadImage(f); if (path) { images.push(path); drawImgs(); } } };
@@ -1017,10 +1206,12 @@ async function openProduct(id, catId, copyFrom) {
     drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); addFiles([...e.dataTransfer.files]); };
     const margin = () => { const pr0 = Number(el.querySelector('[data-t="1"]').value), c = Number($('#pcost', el).value); $('#marg', el).textContent = pr0 && c ? `наценка ${Math.round((pr0 - c) / c * 100)}% · прибыль ${money(pr0 - c)} с шт` : ''; };
     el.querySelector('[data-t="1"]').oninput = margin; $('#pcost', el).oninput = margin; margin();
+    $('#pcat', el).addEventListener('change', (e) => kb.setCategory(e.target.value));
     $('#pcat', el).onchange = (e) => { if (id) return; const t = tplOf(e.target.value); const f = $('#pf', el); f.min_qty.value = t.min_qty || 1; f.pack_qty.value = t.pack_qty || 1; if (t.brand) f.brand.value = t.brand; if (t.desc?.ru && !f.d_ru.value) { f.d_ru.value = t.desc.ru; f.d_uz.value = t.desc.uz || ''; f.d_ky.value = t.desc.ky || ''; } };
     $('#copyP', el) && ($('#copyP', el).onclick = () => { close(); openProduct(null, p.category_id, { ...p, _cost: $('#pcost', el).value, product_images: images.map((url, k) => ({ url, sort: k })) }); });
     $('#saveP', el).onclick = async () => {
       const f = new FormData($('#pf', el)); if (!String(f.get('ru') || '').trim()) return toast('Укажите название', true);
+      const kx = kb.collect(); if (typeof kx === 'string') return toast(kx, true);
       const prices = [...el.querySelectorAll('[data-t]')].filter((i) => i.value !== '').map((i) => ({ price_type_id: Number(i.dataset.t), min_qty: Number(i.dataset.m), price: Number(i.value) }));
       let active = !!f.get('is_active');
       if (active && !prices.some((x) => x.min_qty === 1)) { active = false; toast('Нет цены — товар сохранён скрытым', true); }
@@ -1031,9 +1222,7 @@ async function openProduct(id, catId, copyFrom) {
         sku: String(f.get('sku') || '').trim() || null, barcode: String(f.get('barcode') || '').trim() || null, category_id: f.get('category_id') || null, brand: f.get('brand') || null,
         stock: Number(f.get('stock') || 0), min_stock: Math.max(0, Number(f.get('min_stock') || 0)), min_qty: Math.max(1, Number(f.get('min_qty') || 1)), pack_qty: Math.max(1, Number(f.get('pack_qty') || 1)),
         sort: Number(f.get('sort') || 0), is_new: !!f.get('is_new'), is_hit: !!f.get('is_hit'), is_active: active,
-        compatible_models: String(f.get('models') || '').split(',').map((s) => s.trim()).filter(Boolean),
-        colors: parseColors(String(f.get('colors') || ''), p.colors || []),
-        option_title: String(f.get('opt_title') || '').trim() ? (() => { const v = String(f.get('opt_title')).trim(); return p.option_title?.ru === v ? p.option_title : { ru: v, uz: v, ky: v }; })() : null,
+        ...kx,
       };
       let pid = id;
       if (id) await q(sb.from('products').update(row).eq('id', id));
@@ -1053,7 +1242,7 @@ function quickAdd(catId) {
   const row = () => `<tr><td><input data-f="ru" placeholder="Название *"></td><td><input data-f="sku" placeholder="Артикул"></td><td><input data-f="barcode" placeholder="Штрихкод"></td><td><input data-f="stock" type="number" placeholder="0" style="width:80px"></td><td><input data-f="price" type="number" placeholder="Опт, 1 шт" style="width:110px"></td></tr>`;
   modal(`<div class="head"><h2>Быстрое добавление</h2><button class="x" data-close aria-label="Закрыть">×</button></div>
     <div class="small muted">Заполните строки — остальное (мин. заказ, упаковка, бренд, описание, все уровни цен) возьмётся из шаблона категории. Фото добавьте потом через «Фото пачкой» по артикулу.</div>
-    <label class="f">Категория<select id="qc">${CATS.map((c) => `<option value="${c.id}" ${c.id === catId ? 'selected' : ''}>${esc(L(c.name))}</option>`).join('')}</select></label>
+    <label class="f">Категория<select id="qc">${catOptions(catId)}</select></label>
     <div class="tbl-wrap"><table class="tiers"><thead><tr><th>Название</th><th>Артикул</th><th>Штрихкод</th><th>Остаток</th><th>Цена</th></tr></thead><tbody id="qr">${row().repeat(5)}</tbody></table></div>
     <div class="bar" style="margin:0;justify-content:space-between"><button class="btn ghost" id="more" type="button">+ ещё 5 строк</button>
       <div class="bar" style="margin:0"><label class="chip"><input type="checkbox" id="qa"> сразу в продажу (если есть цена)</label><button class="btn" id="qsave">Создать товары</button></div></div>`, (el, close) => {
@@ -1125,8 +1314,8 @@ VIEWS.categories = async () => {
   $('#main').innerHTML = `<h1>Категории и шаблоны</h1><div class="small muted" style="margin-bottom:12px">Шаблон категории заполняет новые товары автоматически: мин. заказ, упаковка, бренд, описание и расчёт цен от базовой.</div>
   <div class="bar"><span class="grow"></span><button class="btn" id="addC">+ Категория</button></div>
   <div class="tbl-wrap"><table><thead><tr><th></th><th>Название</th><th class="num">Товаров</th><th>Шаблон</th><th class="num">Порядок</th><th>Статус</th></tr></thead><tbody>
-  ${CATS.map((c) => { const t = c.template || {}; return `<tr class="click" data-c="${c.id}"><td><img class="thumb" src="${img(c.image_url)}" alt=""></td><td><b>${esc(c.name.ru)}</b><div class="small muted">${esc(c.name.uz)} · ${esc(c.name.ky)}</div></td>
-    <td class="num">${n(c.id, true)} <span class="muted small">/ ${n(c.id)}</span></td><td class="small">мин. ${t.min_qty || 1} шт · уп. ${t.pack_qty || 1}</td>
+  ${[...CATS.filter(isGroupCat).sort((a, b) => a.sort - b.sort).flatMap((g) => [g, ...CATS.filter((c) => c.parent_id === g.id).sort((a, b) => a.sort - b.sort)]), ...CATS.filter((c) => !isGroupCat(c) && !CATS.some((g) => isGroupCat(g) && g.id === c.parent_id))].map((c) => { const t = c.template || {}; return `<tr class="click" data-c="${c.id}"><td><img class="thumb" src="${img(c.image_url)}" alt=""></td><td><b>${isGroupCat(c) ? '📁 ' : ''}${esc(c.name.ru)}</b><div class="small muted">${isGroupCat(c) ? 'Раздел каталога' : `${esc(L(CATS.find((g) => g.id === c.parent_id)?.name) || 'без раздела')} · ${esc(KINDS[c.template?.kind]?.name || 'Обычные товары')}`}</div></td>
+    <td class="num">${isGroupCat(c) ? '' : `${n(c.id, true)} <span class="muted small">/ ${n(c.id)}</span>`}</td><td class="small">мин. ${t.min_qty || 1} шт · уп. ${t.pack_qty || 1}</td>
     <td class="num">${c.sort}</td><td>${c.is_active ? '<span class="pill p-ok">Вкл</span>' : '<span class="pill p-danger">Выкл</span>'}</td></tr>`; }).join('')}
   </tbody></table></div>`;
   const open = (c) => {
@@ -1134,6 +1323,8 @@ VIEWS.categories = async () => {
     const t = { min_qty: 1, pack_qty: 1, brand: 'IZZAT', tiers: { q10: 5, q50: 10, t2: 5, t3: 10 }, desc: {}, ...(c.template || {}) };
     modal(`<div class="head"><h2>${isNew ? 'Новая категория' : esc(c.name.ru)}</h2><button class="x" data-close>×</button></div>
       <form id="cf" class="cols"><label class="f">RU *<input name="ru" required value="${esc(c.name.ru)}"></label><label class="f">UZ<input name="uz" value="${esc(c.name.uz)}"></label><label class="f">KY<input name="ky" value="${esc(c.name.ky)}"></label>
+      ${isGroupCat(c) ? '<div class="hintBox" style="grid-column:1/-1">Это раздел (группа) каталога. Товары кладутся в категории внутри него.</div>' : `<label class="f">Раздел каталога<select name="parent_id"><option value="">— без раздела —</option>${CATS.filter(isGroupCat).map((g) => `<option value="${g.id}" ${c.parent_id === g.id ? 'selected' : ''}>${esc(L(g.name))}</option>`).join('')}</select></label>
+      <label class="f">Тип товаров (какие поля у товара)<select name="kind">${Object.entries(KINDS).map(([k, v]) => `<option value="${k}" ${(c.template?.kind || 'generic') === k ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></label>`}
       <label class="f">Цвет плитки<select name="color">${[['#FFFFFF', 'Белый'], ['#111111', 'Чёрный'], ['#FFE7D6', 'Оранжевый светлый']].map(([v, nn]) => `<option value="${v}" ${c.color === v ? 'selected' : ''}>${nn}</option>`).join('')}</select></label>
       <label class="f">Порядок<input name="sort" type="number" value="${c.sort}"></label><label class="f">Статус<select name="is_active"><option value="1" ${c.is_active ? 'selected' : ''}>Вкл</option><option value="0" ${!c.is_active ? 'selected' : ''}>Выкл (скрыта у клиентов)</option></select></label>
       <h3 style="grid-column:1/-1;margin:8px 0 0">Шаблон для новых товаров</h3>
@@ -1149,7 +1340,8 @@ VIEWS.categories = async () => {
         const f = new FormData($('#cf', el)); if (!f.get('ru')) return toast('Укажите название', true);
         const tiersN = {};
         const row = { name: { ru: f.get('ru'), uz: f.get('uz') || f.get('ru'), ky: f.get('ky') || f.get('ru') }, color: f.get('color'), sort: Number(f.get('sort') || 0), is_active: f.get('is_active') === '1', image_url: url || null,
-          template: { min_qty: Math.max(1, Number(f.get('t_min') || 1)), pack_qty: Math.max(1, Number(f.get('t_pack') || 1)), brand: f.get('t_brand') || '', tiers: tiersN, desc: { ru: f.get('t_dru') || '', uz: f.get('t_duz') || '', ky: f.get('t_dky') || '' } } };
+          ...(isGroupCat(c) ? {} : { parent_id: f.get('parent_id') || null }),
+          template: { ...(c.template || {}), ...(isGroupCat(c) ? {} : { kind: f.get('kind') || 'generic' }), min_qty: Math.max(1, Number(f.get('t_min') || 1)), pack_qty: Math.max(1, Number(f.get('t_pack') || 1)), brand: f.get('t_brand') || '', tiers: tiersN, desc: { ru: f.get('t_dru') || '', uz: f.get('t_duz') || '', ky: f.get('t_dky') || '' } } };
         if (isNew) await q(sb.from('categories').insert(row)); else await q(sb.from('categories').update(row).eq('id', c.id)); toast('Сохранено'); close(); VIEWS.categories();
       };
     });
@@ -1179,7 +1371,7 @@ VIEWS.import = () => {
     $('#map').innerHTML = `<div class="small muted">Найдено строк: <b>${rows.length}</b>. Проверьте, какие колонки чему соответствуют.</div>
       <div class="cols">${fields.map(([k, n, g]) => `<label class="f">${n}<select data-k="${k}"><option value="">— не использовать —</option>${cols.map((c) => `<option ${c === g ? 'selected' : ''}>${esc(c)}</option>`).join('')}</select></label>`).join('')}
       <label class="f">Новые товары<select id="mode"><option value="update">Только обновить существующие</option><option value="create">Обновить и создать новые</option></select></label>
-      <label class="f">Категория для новых<select id="ncat">${CATS.map((c) => `<option value="${c.id}">${esc(L(c.name))}</option>`).join('')}</select></label></div>
+      <label class="f">Категория для новых<select id="ncat">${catOptions('')}</select></label></div>
       <div class="small muted">Цены типов «Крупный опт» и «VIP» будут рассчитаны от оптовой: −5% и −10%. Уровни «от 10 шт» и «от 50 шт» — −5% и −10%.</div>
       <div class="bar" style="margin:0"><button class="btn dark" id="preview">Предпросмотр</button><button class="btn" id="run" disabled>Импортировать</button></div><div id="res"></div>`;
     let plan = [];
@@ -1857,7 +2049,7 @@ async function importPurchaseRows(file, add) {
   const missCols = [[kN, 'Наименование'], [kQ, 'Количество'], [kC, 'Цена закупки']].filter((x) => !x[0]).map((x) => x[1]);
   if (missCols.length) { toast(`В файле нет обязательных колонок: ${missCols.join(', ')}. Скачайте шаблон (⬇ Шаблон).`, true); return null; }
   const num = (v) => Number(String(v).replace(/\s/g, '').replace(',', '.'));
-  const catBy = (name) => { const n = String(name || '').trim().toLowerCase(); return (n && CATS.find((c) => [c.name?.ru, c.name?.uz, c.name?.ky].some((x) => String(x || '').toLowerCase() === n))) || CATS[0]; };
+  const catBy = (name) => { const n = String(name || '').trim().toLowerCase(); return (n && CATS.find((c) => [c.name?.ru, c.name?.uz, c.name?.ky].some((x) => String(x || '').toLowerCase() === n))) || CATS.find((c) => !isGroupCat(c)); };
   const res = { ok: 0, created: 0, priced: 0, errors: [] };
   for (let i = 0; i < rows.length; i++) {
     const r = rows[i], line = i + 2, name = String(r[kN] || '').trim(), qty = num(r[kQ]), cost = num(r[kC]);
@@ -1892,7 +2084,7 @@ async function importPurchaseRows(file, add) {
 
 function quickProduct(onCreated) {
   modal(`<div class="head"><h2>Новый товар</h2><button class="x" data-close aria-label="Закрыть">×</button></div>
-    <form id="qp" class="cols"><label class="f">Название *<input name="ru" required></label><label class="f">Категория<select name="cat">${CATS.map((c) => `<option value="${c.id}">${esc(L(c.name))}</option>`).join('')}</select></label>
+    <form id="qp" class="cols"><label class="f">Название *<input name="ru" required></label><label class="f">Категория<select name="cat">${catOptions('')}</select></label>
     <label class="f">Артикул<input name="sku"></label><label class="f">Штрихкод <span class="muted">(пусто — создадим)</span><input name="barcode"></label>
     <label class="f">Цена, с<input name="price" type="number" min="0"></label></form>
     <div class="small muted">Остальные цены заполнятся по шаблону категории. Фото и описание добавьте потом в «Товары».</div>
@@ -2004,7 +2196,7 @@ VIEWS.stock = async () => {
   }
   const sts = await q(sb.from('stocktakes').select('*, categories(name)').order('created_at', { ascending: false }).limit(50));
   $('#stBody').innerHTML = `<div class="small muted" style="margin-bottom:10px">Начните инвентаризацию (вся база или одна категория), сканируйте товары на полках — каждый скан +1. Продажи во время подсчёта учитываются: при проведении меняется только разница «насчитано − ожидалось».</div>
-    ${staff ? `<div class="bar"><select id="stCat"><option value="">Все товары</option>${CATS.map((c) => `<option value="${c.id}">${esc(L(c.name))}</option>`).join('')}</select><button class="btn" id="stNew">Начать инвентаризацию</button></div>` : ''}
+    ${staff ? `<div class="bar"><select id="stCat"><option value="">Все товары</option>${catOptions('')}</select><button class="btn" id="stNew">Начать инвентаризацию</button></div>` : ''}
     <div class="tbl-wrap"><table><thead><tr><th>№</th><th>Дата</th><th>Область</th><th>Статус</th><th class="num">Разница, шт</th><th class="num">Разница, с</th></tr></thead><tbody>
     ${sts.map((s) => `<tr class="click" data-s="${s.id}"><td><b>${s.number}</b></td><td class="small">${dt(s.created_at)}</td><td>${esc(L(s.categories?.name) || 'Все товары')}</td><td>${s.status === 'open' ? '<span class="pill p-warn">идёт подсчёт</span>' : '<span class="pill p-ok">проведена</span>'}</td>
       <td class="num">${s.status === 'posted' ? s.diff_qty : '—'}</td><td class="num">${s.status === 'posted' ? `<b style="color:${Number(s.diff_value) < 0 ? 'var(--danger)' : 'var(--ok)'}">${money(s.diff_value)}</b>` : '—'}</td></tr>`).join('') || '<tr><td colspan="6" class="empty">Инвентаризаций ещё не было</td></tr>'}</tbody></table></div>`;
