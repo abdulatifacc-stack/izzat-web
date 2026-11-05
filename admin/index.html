@@ -1318,7 +1318,7 @@ VIEWS.categories = async () => {
   <div class="tbl-wrap"><table><thead><tr><th></th><th>Название</th><th class="num">Товаров</th><th>Шаблон</th><th class="num">Порядок</th><th>Статус</th></tr></thead><tbody>
   ${[...CATS.filter(isGroupCat).sort((a, b) => a.sort - b.sort).flatMap((g) => [g, ...CATS.filter((c) => c.parent_id === g.id).sort((a, b) => a.sort - b.sort)]), ...CATS.filter((c) => !isGroupCat(c) && !CATS.some((g) => isGroupCat(g) && g.id === c.parent_id))].map((c) => { const t = c.template || {}; return `<tr class="click" data-c="${c.id}"><td><img class="thumb" src="${img(c.image_url)}" alt=""></td><td><b>${isGroupCat(c) ? '📁 ' : ''}${esc(c.name.ru)}</b><div class="small muted">${isGroupCat(c) ? 'Раздел каталога' : `${esc(L(CATS.find((g) => g.id === c.parent_id)?.name) || 'без раздела')} · ${esc(KINDS[c.template?.kind]?.name || 'Обычные товары')}`}</div></td>
     <td class="num">${isGroupCat(c) ? '' : `${n(c.id, true)} <span class="muted small">/ ${n(c.id)}</span>`}</td><td class="small">мин. ${t.min_qty || 1} шт · уп. ${t.pack_qty || 1}</td>
-    <td class="num">${c.sort}</td><td>${c.is_active ? '<span class="pill p-ok">Вкл</span>' : '<span class="pill p-danger">Выкл</span>'}</td></tr>`; }).join('')}
+    <td class="num">${c.sort}</td><td>${isGroupCat(c) ? '<span class="pill">Раздел</span>' : c.is_active ? '<span class="pill p-ok">Вкл</span>' : '<span class="pill p-danger">Выкл</span>'}</td></tr>`; }).join('')}
   </tbody></table></div>`;
   const open = (c) => {
     const isNew = !c; c = c || { name: {}, color: '#FFFFFF', sort: CATS.length, is_active: true, image_url: '', template: {} };
@@ -1328,7 +1328,7 @@ VIEWS.categories = async () => {
       ${isGroupCat(c) ? '<div class="hintBox" style="grid-column:1/-1">Это раздел (группа) каталога. Товары кладутся в категории внутри него.</div>' : `<label class="f">Раздел каталога<select name="parent_id"><option value="">— без раздела —</option>${CATS.filter(isGroupCat).map((g) => `<option value="${g.id}" ${c.parent_id === g.id ? 'selected' : ''}>${esc(L(g.name))}</option>`).join('')}</select></label>
       <label class="f">Тип товаров (какие поля у товара)<select name="kind">${Object.entries(KINDS).map(([k, v]) => `<option value="${k}" ${(c.template?.kind || 'generic') === k ? 'selected' : ''}>${esc(v.name)}</option>`).join('')}</select></label>`}
       <label class="f">Цвет плитки<select name="color">${[['#FFFFFF', 'Белый'], ['#111111', 'Чёрный'], ['#FFE7D6', 'Оранжевый светлый']].map(([v, nn]) => `<option value="${v}" ${c.color === v ? 'selected' : ''}>${nn}</option>`).join('')}</select></label>
-      <label class="f">Порядок<input name="sort" type="number" value="${c.sort}"></label><label class="f">Статус<select name="is_active"><option value="1" ${c.is_active ? 'selected' : ''}>Вкл</option><option value="0" ${!c.is_active ? 'selected' : ''}>Выкл (скрыта у клиентов)</option></select></label>
+      <label class="f">Порядок<input name="sort" type="number" value="${c.sort}"></label>${isGroupCat(c) ? '' : `<label class="f">Статус<select name="is_active"><option value="1" ${c.is_active ? 'selected' : ''}>Вкл</option><option value="0" ${!c.is_active ? 'selected' : ''}>Выкл (скрыта у клиентов)</option></select></label>`}
       <h3 style="grid-column:1/-1;margin:8px 0 0">Шаблон для новых товаров</h3>
       <label class="f">Мин. заказ, шт<input name="t_min" type="number" min="1" value="${t.min_qty}"></label><label class="f">В упаковке, шт<input name="t_pack" type="number" min="1" value="${t.pack_qty}"></label>
       <label class="f">Бренд<input name="t_brand" value="${esc(t.brand)}"></label>
@@ -1341,7 +1341,7 @@ VIEWS.categories = async () => {
       $('#csave', el).onclick = async () => {
         const f = new FormData($('#cf', el)); if (!f.get('ru')) return toast('Укажите название', true);
         const tiersN = {};
-        const row = { name: { ru: f.get('ru'), uz: f.get('uz') || f.get('ru'), ky: f.get('ky') || f.get('ru') }, color: f.get('color'), sort: Number(f.get('sort') || 0), is_active: f.get('is_active') === '1', image_url: url || null,
+        const row = { name: { ru: f.get('ru'), uz: f.get('uz') || f.get('ru'), ky: f.get('ky') || f.get('ru') }, color: f.get('color'), sort: Number(f.get('sort') || 0), is_active: isGroupCat(c) ? false : f.get('is_active') === '1', image_url: url || null,
           ...(isGroupCat(c) ? {} : { parent_id: f.get('parent_id') || null }),
           template: { ...(c.template || {}), ...(isGroupCat(c) ? {} : { kind: f.get('kind') || 'generic' }), min_qty: Math.max(1, Number(f.get('t_min') || 1)), pack_qty: Math.max(1, Number(f.get('t_pack') || 1)), brand: f.get('t_brand') || '', tiers: tiersN, desc: { ru: f.get('t_dru') || '', uz: f.get('t_duz') || '', ky: f.get('t_dky') || '' } } };
         if (isNew) await q(sb.from('categories').insert(row)); else await q(sb.from('categories').update(row).eq('id', c.id)); toast('Сохранено'); close(); VIEWS.categories();
