@@ -685,13 +685,13 @@ VIEWS.shops = async () => {
   $('#main').innerHTML = `<h1>Клиенты</h1>
   <div class="bar"><div class="chips">${[['', 'Все'], ...Object.entries(SEG).map(([k, v]) => [k, v[0]])].map(([k, n]) => `<button class="chip ${segFilter === k ? 'on' : ''}" data-seg="${k}">${n} <span class="muted">${counts[k] || 0}</span></button>`).join('')}</div></div>
   <div class="bar"><input id="sq" placeholder="Поиск: название, город, телефон" class="grow" value="${esc(shopSearch)}"><button class="btn" id="addShop">+ Новый клиент</button></div>
-  <div class="tbl-wrap"><table><thead><tr><th>Клиент</th><th>Город</th><th>Статус</th><th>Тип цен</th><th class="num">Заказов</th><th class="num">Купил на</th><th>Последний заказ</th><th class="num">Долг / лимит</th><th>Вход</th></tr></thead><tbody id="sb"></tbody></table></div>`;
+  <div class="tbl-wrap"><table><thead><tr><th>Клиент</th><th>Город</th><th>Статус</th><th class="num">Скидка</th><th class="num">Заказов</th><th class="num">Купил на</th><th>Последний заказ</th><th class="num">Долг / лимит</th><th>Вход</th></tr></thead><tbody id="sb"></tbody></table></div>`;
   const draw = () => {
     const s = shopSearch.toLowerCase();
     $('#sb').innerHTML = shops.filter((x) => (!segFilter || x.segment === segFilter) && (!s || [x.name, x.city, x.phone, x.owner_name].join(' ').toLowerCase().includes(s))).map((x) => {
       const st = S[x.id] || {}; const u = users.filter((p) => p.shop_id === x.id); const debt = Number(st.balance || 0); const over = x.credit_limit > 0 && debt > x.credit_limit * 0.9;
       return `<tr class="click" data-s="${x.id}"><td><b>${esc(x.name)}</b><div class="small muted">${esc(x.owner_name)} · ${esc(x.phone)}</div></td><td>${esc(x.city)}</td>
-      <td>${segPill(x.segment)}${x.is_active ? '' : ' <span class="pill p-danger">закрыт</span>'}</td><td class="small">${esc(L(PT.find((p) => p.id === x.price_type_id)?.name))}</td>
+      <td>${segPill(x.segment)}${x.is_active ? '' : ' <span class="pill p-danger">закрыт</span>'}</td><td class="num">${Number(x.discount_pct) ? `<b>−${Number(x.discount_pct)}%</b>` : '<span class="muted">—</span>'}</td>
       <td class="num">${st.orders_count || 0}</td><td class="num">${money(st.revenue)}</td><td class="small">${st.last_order ? dt(st.last_order) : '—'}</td>
       <td class="num"><b style="color:${debt > 0 ? (over ? 'var(--danger)' : 'var(--ink)') : 'var(--ok)'}">${money(debt)}</b><div class="small muted">из ${money(x.credit_limit)}</div></td>
       <td class="small">${u.length ? u.length : '<span class="pill p-warn">нет</span>'}</td></tr>`;
@@ -707,7 +707,7 @@ VIEWS.shops = async () => {
 function genPass() { return String(Math.floor(100000 + Math.random() * 900000)); }
 
 async function openShop(s, users, stats) {
-  const isNew = !s; s = s || { name: '', city: '', address: '', phone: '+996 ', owner_name: '', price_type_id: 1, credit_limit: 0, is_active: true, segment: 'new' };
+  const isNew = !s; s = s || { name: '', city: '', address: '', phone: '+996 ', owner_name: '', price_type_id: 1, discount_pct: 0, credit_limit: 0, is_active: true, segment: 'new' };
   const u = isNew ? [] : users.filter((p) => p.shop_id === s.id);
   const st = (stats && stats[s.id]) || {};
   const ords = isNew ? [] : await q(sb.from('orders').select('id,number,created_at,status,total').eq('shop_id', s.id).order('created_at', { ascending: false }).limit(10));
@@ -722,7 +722,7 @@ async function openShop(s, users, stats) {
       <label class="f">Телефон<input name="phone" value="${esc(s.phone)}"></label>
       <label class="f">Владелец<input name="owner_name" value="${esc(s.owner_name)}"></label>
       <label class="f">Статус клиента<select name="segment">${Object.entries(SEG).map(([k, v]) => `<option value="${k}" ${s.segment === k ? 'selected' : ''}>${v[0]}</option>`).join('')}</select></label>
-      <label class="f">Тип цен<select name="price_type_id">${PT.map((p) => `<option value="${p.id}" ${p.id === s.price_type_id ? 'selected' : ''}>${esc(L(p.name))}</option>`).join('')}</select></label>
+      <label class="f">Скидка клиенту, % <span class="muted">(от общей цены; клиент видит только итоговую цену)</span><input name="discount_pct" type="number" min="0" max="50" step="0.5" value="${Number(s.discount_pct || 0)}"></label>
       <label class="f">Лимит долга, с<input name="credit_limit" type="number" min="0" step="100" value="${s.credit_limit}"></label>
       <label class="f">Срок оплаты долга, дней<input name="payment_days" type="number" min="0" value="${s.payment_days ?? 14}"></label>
       ${isNew ? '' : `<label class="f">Бонусы клиента, с<input disabled value="${money(s.bonus_balance)}"></label>`}
@@ -748,7 +748,7 @@ async function openShop(s, users, stats) {
     $('#saveShop', el).onclick = async () => {
       const f = new FormData($('#sf', el)); if (!f.get('name')) return toast('Укажите название', true);
       const row = { name: f.get('name'), city: f.get('city') || null, address: f.get('address') || null, phone: f.get('phone') || null, owner_name: f.get('owner_name') || null,
-        price_type_id: Number(f.get('price_type_id')), credit_limit: Number(f.get('credit_limit') || 0), payment_days: Math.max(0, Number(f.get('payment_days') || 0)), is_active: f.get('is_active') === '1', segment: f.get('segment') };
+        discount_pct: Math.min(50, Math.max(0, Number(f.get('discount_pct') || 0))), credit_limit: Number(f.get('credit_limit') || 0), payment_days: Math.max(0, Number(f.get('payment_days') || 0)), is_active: f.get('is_active') === '1', segment: f.get('segment') };
       const note = String(f.get('segment_note') || '').trim();
       if (isNew) { const ns = await q(sb.from('shops').insert(row).select('*').single()); if (note) await q(sb.from('shop_notes').upsert({ shop_id: ns.id, note })); toast('Клиент создан — выдайте вход'); close(); openShop(ns, users, stats); return; }
       await q(sb.from('shops').update(row).eq('id', s.id)); await q(sb.from('shop_notes').upsert({ shop_id: s.id, note, updated_at: new Date().toISOString() })); toast('Сохранено'); close(); route();
@@ -788,14 +788,14 @@ VIEWS.requests = async () => {
     const r = rows.find((x) => x.id === b.dataset.ok);
     modal(`<div class="head"><h2>Одобрить: ${esc(r.shop_name)}</h2><button class="x" data-close aria-label="Закрыть">×</button></div>
       <div class="small muted">Создадим клиента и вход в приложение. Логин — телефон, пароль сгенерируется. Сразу отправьте его клиенту в WhatsApp.</div>
-      <div class="cols"><label class="f">Тип цен<select id="aPT">${PT.filter((t) => t.id !== 4).map((t) => `<option value="${t.id}">${esc(L(t.name))}</option>`).join('')}</select></label>
+      <div class="cols"><label class="f">Скидка клиенту, %<input id="aDisc" type="number" min="0" max="50" step="0.5" value="0"></label>
         <label class="f">Лимит долга, с<input id="aLim" type="number" min="0" step="1000" value="0"></label><label class="f">Срок оплаты долга, дней<input id="aDays" type="number" min="0" value="14"></label>
         <label class="f">Телефон для входа<input id="aPh" value="${esc(r.phone)}"></label></div>
       <div id="aCred"></div><div class="bar" style="margin:0;justify-content:flex-end"><button class="btn ghost" data-close>Закрыть</button><button class="btn" id="aGo">Одобрить и выдать вход</button></div>`, (el) => {
       $('#aGo', el).onclick = async () => {
         const phone = '+' + digits($('#aPh', el).value); if (digits(phone).length !== 12) return toast('Телефон в формате +996 XXX XXX XXX', true);
         $('#aGo', el).disabled = true;
-        const shop = await q(sb.from('shops').insert({ name: r.shop_name, city: r.city, phone: r.phone, owner_name: r.owner_name, price_type_id: Number($('#aPT', el).value), credit_limit: Number($('#aLim', el).value) || 0, payment_days: Number($('#aDays', el).value) || 0 }).select('*').single());
+        const shop = await q(sb.from('shops').insert({ name: r.shop_name, city: r.city, phone: r.phone, owner_name: r.owner_name, discount_pct: Math.min(50, Math.max(0, Number($('#aDisc', el).value) || 0)), credit_limit: Number($('#aLim', el).value) || 0, payment_days: Number($('#aDays', el).value) || 0 }).select('*').single());
         await q(sb.from('access_requests').update({ status: 'approved', shop_id: shop.id, handled_at: new Date().toISOString() }).eq('id', r.id));
         const pass = genPass();
         const { data, error } = await sb.functions.invoke('admin-users', { body: { action: 'create_user', phone, password: pass, role: 'client', shop_id: shop.id, full_name: r.owner_name || '' } });
@@ -854,13 +854,8 @@ let prodSearch = '', prodCat = '', prodFilter = 'all';
 const PFILTERS = { all: 'Все', active: 'В продаже', hidden: 'Скрытые', nophoto: 'Без фото', noprice: 'Без цены', nostock: 'Нет в наличии', low: 'Мало (≤ мин.)' };
 const tplOf = (catId) => ({ min_qty: 1, pack_qty: 1, brand: 'IZZAT', tiers: { q10: 5, q50: 10, t2: 5, t3: 10 }, desc: {}, ...(CATS.find((c) => c.id === catId)?.template || {}) });
 const round5 = (v) => (v >= 300 ? Math.round(v / 5) * 5 : Math.round(v));
-/** Full price grid from one base (opt, 1 pc) price using the category template percentages. */
-function priceGrid(base, tpl) {
-  const t = tpl.tiers || {}; const typeK = { 1: 0, 2: t.t2 ?? 5, 3: t.t3 ?? 10 }; const qtyK = { 1: 0, 10: t.q10 ?? 5, 50: t.q50 ?? 10 };
-  const out = [];
-  for (const pt of PT) { if (pt.id === 4) { out.push({ price_type_id: 4, min_qty: 1, price: round5(base * (1 + (t.retail ?? 25) / 100)) }); continue; } for (const mq of [1, 10, 50]) out.push({ price_type_id: pt.id, min_qty: mq, price: round5(base * (1 - (typeK[pt.id] ?? 0) / 100) * (1 - qtyK[mq] / 100)) }); }
-  return out;
-}
+/** One price per product (clients get a personal discount on top, set in the client card). */
+function priceGrid(base) { return [{ price_type_id: 1, min_qty: 1, price: Math.round(Number(base)) }]; }
 
 VIEWS.products = async () => {
   $('#main').innerHTML = `<h1>Товары</h1>
@@ -871,7 +866,7 @@ VIEWS.products = async () => {
   <div class="bar hidden" id="bulkBar" style="background:#111;color:#fff;padding:10px 12px;border-radius:12px"><b id="selN"></b><span class="grow"></span>
     <button class="btn sm" data-bulk="on">Включить продажу</button><button class="btn sm ghost" style="color:#fff;border-color:#666" data-bulk="off">Скрыть</button>
     <button class="btn sm ghost" style="color:#fff;border-color:#666" data-bulk="new">NEW вкл/выкл</button><select id="moveCat" style="height:32px"><option value="">Перенести в…</option>${CATS.map((c) => `<option value="${c.id}">${esc(L(c.name))}</option>`).join('')}</select></div>
-  <div class="tbl-wrap"><table><thead><tr><th><input type="checkbox" id="selAll" aria-label="Выбрать все"></th><th></th><th>Товар</th><th>Арт. / штрихкод</th><th>Категория</th>${PT.map((p) => `<th class="num">${esc(L(p.name))}</th>`).join('')}<th class="num">Остаток</th><th>В продаже</th></tr></thead><tbody id="pb"><tr><td colspan="10" class="empty">Загрузка…</td></tr></tbody></table></div>`;
+  <div class="tbl-wrap"><table><thead><tr><th><input type="checkbox" id="selAll" aria-label="Выбрать все"></th><th></th><th>Товар</th><th>Арт. / штрихкод</th><th>Категория</th><th class="num">Цена</th><th class="num">Остаток</th><th>В продаже</th></tr></thead><tbody id="pb"><tr><td colspan="10" class="empty">Загрузка…</td></tr></tbody></table></div>`;
   let rows = []; const sel = new Set();
   const flags = (p) => ({ active: p.is_active, hidden: !p.is_active, nophoto: !(p.product_images || []).length, noprice: !(p.product_prices || []).length, nostock: p.stock <= 0, low: p.stock > 0 && p.stock <= 10, all: true });
   const drawBulk = () => { $('#bulkBar').classList.toggle('hidden', !sel.size); $('#selN').textContent = `Выбрано: ${sel.size}`; };
@@ -886,7 +881,7 @@ VIEWS.products = async () => {
       return `<tr class="click ${p.is_active ? '' : 'off'}" data-p="${p.id}"><td data-stop><input type="checkbox" data-sel="${p.id}" ${sel.has(p.id) ? 'checked' : ''} aria-label="Выбрать"></td>
         <td>${im ? `<img class="thumb" src="${img(im.url)}" alt="">` : '<span class="pill p-warn">нет фото</span>'}</td><td><b>${esc(L(p.name))}</b> ${p.is_new ? '<span class="pill p-brand">NEW</span>' : ''}${p.is_hit ? ' <span class="pill">HIT</span>' : ''}</td>
         <td class="small">${esc(p.sku) || '—'}<div class="muted">${esc(p.barcode)}</div></td><td class="small">${esc(L(CATS.find((c) => c.id === p.category_id)?.name))}</td>
-        ${PT.map((t) => `<td class="num">${base(t.id) != null ? money(base(t.id)) : '<span class="pill p-danger">—</span>'}</td>`).join('')}
+        <td class="num">${base(1) != null ? money(base(1)) : '<span class="pill p-danger">нет цены</span>'}</td>
         <td class="num"><span class="pill ${p.stock <= 0 ? 'p-danger' : p.stock <= 10 ? 'p-warn' : 'p-ok'}">${p.stock}</span></td>
         <td data-stop><label class="switch" title="В продаже"><input type="checkbox" data-act="${p.id}" ${p.is_active ? 'checked' : ''}><span></span></label></td></tr>`;
     }).join('') || '<tr><td colspan="10" class="empty">Ничего не найдено</td></tr>';
@@ -966,12 +961,10 @@ async function openProduct(id, catId, copyFrom) {
     <label class="f">Tavsif (UZ)<textarea name="d_uz" rows="2">${esc(p.description?.uz)}</textarea></label>
     <label class="f">Сүрөттөмө (KY)<textarea name="d_ky" rows="2">${esc(p.description?.ky)}</textarea></label>
   </form>
-  <h3>Цены</h3>
-  <div class="bar" style="margin:0"><label class="f" style="flex-direction:row;align-items:center;gap:8px">Базовая оптовая цена (1 шт):<input id="baseP" type="number" min="0" style="width:120px" value="${pr(1, 1)}"></label><button class="btn sm dark" type="button" id="fillP">Заполнить все цены по шаблону</button></div>
-  <div class="tbl-wrap"><table class="tiers"><thead><tr><th>Тип цен</th>${tiers.map((m) => `<th>от ${m} шт</th>`).join('')}</tr></thead><tbody>
-    ${PT.map((t) => `<tr><td><b>${esc(L(t.name))}</b></td>${tiers.map((m) => `<td><input type="number" min="0" data-t="${t.id}" data-m="${m}" value="${pr(t.id, m)}" placeholder="—"></td>`).join('')}</tr>`).join('')}
-  </tbody></table></div>
-  <div class="small muted">Пустое поле — уровень не используется. Клиент видит только цены своего типа. «Розница» — цена в магазине для покупателей без аккаунта. Цена «от 1 шт» обязательна, чтобы товар можно было включить в продажу.</div><div id="margin" class="small"></div>
+  <h3>Цена</h3>
+  <div class="bar" style="margin:0"><label class="f" style="flex-direction:row;align-items:center;gap:8px">Цена за 1 шт, с *<input data-t="1" data-m="1" type="number" min="0" style="width:140px;font-size:18px;font-weight:700" value="${pr(1, 1)}" placeholder="0"></label>
+    <span class="small muted" id="marg"></span></div>
+  <div class="small muted" style="margin-bottom:6px">Одна цена для всех. Персональная скидка клиента (например 3% или 5%) ставится в карточке клиента — клиент сразу видит свою цену.</div>
   <h3>Фото <span class="small muted">— первое фото главное, перетаскивайте для порядка</span></h3>
   <div class="imgs" id="imgs"></div>
   <div class="drop" id="drop">Перетащите фото сюда или <label class="link">выберите файлы<input type="file" id="upl" accept="image/jpeg,image/png,image/webp" multiple hidden></label></div>
@@ -988,26 +981,22 @@ async function openProduct(id, catId, copyFrom) {
       });
     };
     drawImgs();
-    const mg = () => { const c = Number($('#pcost', el).value) || 0; const o = Number(el.querySelector('[data-t="1"][data-m="1"]')?.value) || 0; const r = Number(el.querySelector('[data-t="4"][data-m="1"]')?.value) || 0;
-      $('#margin', el).innerHTML = c ? `Наценка: опт ${o ? Math.round((o - c) / c * 100) + '% (' + money(o - c) + ')' : '—'} · розница ${r ? Math.round((r - c) / c * 100) + '% (' + money(r - c) + ')' : '—'}` : '<span class="muted">Укажите себестоимость — будет видна наценка и прибыль в отчётах</span>'; };
-    el.addEventListener('input', (e) => { if (e.target.matches('#pcost,[data-t]')) mg(); }); mg();
+
     if (images.length >= 5) toast('Совет: 4–5 фото достаточно — первое главное');
     const addFiles = async (files) => { for (const f of files) { const path = await uploadImage(f); if (path) { images.push(path); drawImgs(); } } };
     $('#upl', el).onchange = async (e) => { await addFiles(e.target.files); e.target.value = ''; };
     const drop = $('#drop', el);
     drop.ondragover = (e) => { e.preventDefault(); drop.classList.add('over'); }; drop.ondragleave = () => drop.classList.remove('over');
     drop.ondrop = (e) => { e.preventDefault(); drop.classList.remove('over'); addFiles([...e.dataTransfer.files]); };
-    $('#fillP', el).onclick = () => {
-      const base = Number($('#baseP', el).value); if (!base) return toast('Введите базовую цену', true);
-      priceGrid(base, tplOf($('#pcat', el).value)).forEach((g) => { const i = el.querySelector(`[data-t="${g.price_type_id}"][data-m="${g.min_qty}"]`); if (i) i.value = g.price; });
-    };
+    const margin = () => { const pr0 = Number(el.querySelector('[data-t="1"]').value), c = Number($('#pcost', el).value); $('#marg', el).textContent = pr0 && c ? `наценка ${Math.round((pr0 - c) / c * 100)}% · прибыль ${money(pr0 - c)} с шт` : ''; };
+    el.querySelector('[data-t="1"]').oninput = margin; $('#pcost', el).oninput = margin; margin();
     $('#pcat', el).onchange = (e) => { if (id) return; const t = tplOf(e.target.value); const f = $('#pf', el); f.min_qty.value = t.min_qty || 1; f.pack_qty.value = t.pack_qty || 1; if (t.brand) f.brand.value = t.brand; if (t.desc?.ru && !f.d_ru.value) { f.d_ru.value = t.desc.ru; f.d_uz.value = t.desc.uz || ''; f.d_ky.value = t.desc.ky || ''; } };
     $('#copyP', el) && ($('#copyP', el).onclick = () => { close(); openProduct(null, p.category_id, { ...p, _cost: $('#pcost', el).value, product_images: images.map((url, k) => ({ url, sort: k })) }); });
     $('#saveP', el).onclick = async () => {
       const f = new FormData($('#pf', el)); if (!String(f.get('ru') || '').trim()) return toast('Укажите название', true);
       const prices = [...el.querySelectorAll('[data-t]')].filter((i) => i.value !== '').map((i) => ({ price_type_id: Number(i.dataset.t), min_qty: Number(i.dataset.m), price: Number(i.value) }));
       let active = !!f.get('is_active');
-      if (active && !prices.some((x) => x.min_qty === 1)) { active = false; toast('Нет цены «от 1 шт» — товар сохранён скрытым', true); }
+      if (active && !prices.some((x) => x.min_qty === 1)) { active = false; toast('Нет цены — товар сохранён скрытым', true); }
       const ru = String(f.get('ru')).trim();
       const row = {
         name: { ru, uz: String(f.get('uz') || '').trim() || ru, ky: String(f.get('ky') || '').trim() || ru },
@@ -1108,7 +1097,7 @@ VIEWS.categories = async () => {
   <div class="bar"><span class="grow"></span><button class="btn" id="addC">+ Категория</button></div>
   <div class="tbl-wrap"><table><thead><tr><th></th><th>Название</th><th class="num">Товаров</th><th>Шаблон</th><th class="num">Порядок</th><th>Статус</th></tr></thead><tbody>
   ${CATS.map((c) => { const t = c.template || {}; return `<tr class="click" data-c="${c.id}"><td><img class="thumb" src="${img(c.image_url)}" alt=""></td><td><b>${esc(c.name.ru)}</b><div class="small muted">${esc(c.name.uz)} · ${esc(c.name.ky)}</div></td>
-    <td class="num">${n(c.id, true)} <span class="muted small">/ ${n(c.id)}</span></td><td class="small">мин. ${t.min_qty || 1} шт · уп. ${t.pack_qty || 1} · −${t.tiers?.q10 ?? 5}%/−${t.tiers?.q50 ?? 10}% за объём</td>
+    <td class="num">${n(c.id, true)} <span class="muted small">/ ${n(c.id)}</span></td><td class="small">мин. ${t.min_qty || 1} шт · уп. ${t.pack_qty || 1}</td>
     <td class="num">${c.sort}</td><td>${c.is_active ? '<span class="pill p-ok">Вкл</span>' : '<span class="pill p-danger">Выкл</span>'}</td></tr>`; }).join('')}
   </tbody></table></div>`;
   const open = (c) => {
@@ -1121,8 +1110,6 @@ VIEWS.categories = async () => {
       <h3 style="grid-column:1/-1;margin:8px 0 0">Шаблон для новых товаров</h3>
       <label class="f">Мин. заказ, шт<input name="t_min" type="number" min="1" value="${t.min_qty}"></label><label class="f">В упаковке, шт<input name="t_pack" type="number" min="1" value="${t.pack_qty}"></label>
       <label class="f">Бренд<input name="t_brand" value="${esc(t.brand)}"></label>
-      <label class="f">Скидка от 10 шт, %<input name="t_q10" type="number" min="0" max="50" value="${t.tiers.q10}"></label><label class="f">Скидка от 50 шт, %<input name="t_q50" type="number" min="0" max="50" value="${t.tiers.q50}"></label>
-      ${PT.filter((x) => x.id > 1).map((x) => `<label class="f">«${esc(L(x.name))}» дешевле опта на, %<input name="t_t${x.id}" type="number" min="0" max="50" value="${t.tiers['t' + x.id] ?? (x.id === 2 ? 5 : 10)}"></label>`).join('')}
       <label class="f" style="grid-column:1/-1">Описание по умолчанию (RU)<textarea name="t_dru" rows="2">${esc(t.desc?.ru)}</textarea></label>
       <label class="f">UZ<textarea name="t_duz" rows="2">${esc(t.desc?.uz)}</textarea></label><label class="f">KY<textarea name="t_dky" rows="2">${esc(t.desc?.ky)}</textarea></label></form>
       <div class="imgs"><div class="im"><img id="cimg" src="${img(c.image_url)}" alt=""></div></div><label class="btn ghost" style="align-self:flex-start">Картинка категории<input type="file" id="cupl" accept="image/*" hidden></label>
@@ -1131,7 +1118,7 @@ VIEWS.categories = async () => {
       $('#cupl', el).onchange = async (e) => { const f = e.target.files[0]; if (!f) return; const path = await uploadImage(f, 'c'); if (path) { url = path; $('#cimg', el).src = img(url); } };
       $('#csave', el).onclick = async () => {
         const f = new FormData($('#cf', el)); if (!f.get('ru')) return toast('Укажите название', true);
-        const tiersN = { q10: Number(f.get('t_q10') || 0), q50: Number(f.get('t_q50') || 0) }; PT.filter((x) => x.id > 1).forEach((x) => tiersN['t' + x.id] = Number(f.get('t_t' + x.id) || 0));
+        const tiersN = {};
         const row = { name: { ru: f.get('ru'), uz: f.get('uz') || f.get('ru'), ky: f.get('ky') || f.get('ru') }, color: f.get('color'), sort: Number(f.get('sort') || 0), is_active: f.get('is_active') === '1', image_url: url || null,
           template: { min_qty: Math.max(1, Number(f.get('t_min') || 1)), pack_qty: Math.max(1, Number(f.get('t_pack') || 1)), brand: f.get('t_brand') || '', tiers: tiersN, desc: { ru: f.get('t_dru') || '', uz: f.get('t_duz') || '', ky: f.get('t_dky') || '' } } };
         if (isNew) await q(sb.from('categories').insert(row)); else await q(sb.from('categories').update(row).eq('id', c.id)); toast('Сохранено'); close(); VIEWS.categories();
@@ -1191,7 +1178,7 @@ VIEWS.import = () => {
     $('#run').onclick = async () => {
       $('#run').disabled = true; let done = 0, made = 0;
       const create = $('#mode').value === 'create', cat = $('#ncat').value;
-      const priceRows = (pid, base) => PT.flatMap((t, ti) => [1, 10, 50].map((mq, mi) => ({ product_id: pid, price_type_id: t.id, min_qty: mq, price: Math.round(base * [1, .95, .9][ti] * [1, .95, .9][mi] / 5) * 5 })));
+      const priceRows = (pid, base) => priceGrid(base).map((g) => ({ ...g, product_id: pid }));
       for (const x of plan) {
         try {
           if (x.id) {
@@ -1334,9 +1321,10 @@ const lsGet = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d;
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 const today = () => new Date(Date.now() + 6 * 36e5).toISOString().slice(0, 10);
 const pImg = (p) => img([...(p.product_images || [])].sort((a, b) => a.sort - b.sort)[0]?.url);
-function unitPriceOf(p, type, qty) {
-  const pick = (t) => (p.product_prices || []).filter((x) => x.price_type_id === t && x.min_qty <= qty).sort((a, b) => b.min_qty - a.min_qty)[0]?.price;
-  const v = pick(type) ?? pick(4) ?? pick(1); return v == null ? null : Number(v);
+/** One price per product; `disc` = the client's personal discount % (same rounding as the server). */
+function unitPriceOf(p, disc = 0) {
+  const pp = p.product_prices || []; const v = (pp.find((x) => x.price_type_id === 1 && x.min_qty === 1) || pp[0])?.price;
+  return v == null ? null : Math.round(Number(v) * (1 - (Number(disc) || 0) / 100));
 }
 async function loadErpRefs() {
   if (['admin', 'manager', 'cashier'].includes(ME.role)) CB = (await sb.from('cashboxes').select('*').eq('is_active', true).order('sort')).data || [];
@@ -1378,10 +1366,10 @@ function productPicker(input, box, onPick) {
 /* ================= POS ================= */
 let POS = lsGet('izzat.pos', { items: [], shop: null, discount: 0, discountPct: false, bonus: 0, note: '' });
 const savePos = () => lsSet('izzat.pos', POS);
-function posType() { return POS.shop?.price_type_id || 4; }
+function posDisc() { return Number(POS.shop?.discount_pct || 0); }
 function posCalc() {
   let sub = 0, units = 0;
-  POS.items.forEach((it) => { it.list = unitPriceOf(it.p, posType(), it.qty); if (it.manual == null) it.price = it.list; sub += (it.price ?? 0) * it.qty; units += it.qty; });
+  POS.items.forEach((it) => { it.list = unitPriceOf(it.p, posDisc()); if (it.manual == null) it.price = it.list; sub += (it.price ?? 0) * it.qty; units += it.qty; });
   const disc = POS.discountPct ? Math.round(sub * (Number(POS.discount) || 0) / 100) : Number(POS.discount) || 0;
   const total = Math.max(0, sub - disc - (Number(POS.bonus) || 0));
   return { sub, disc, total, units };
@@ -1417,7 +1405,7 @@ VIEWS.pos = async () => {
   productPicker(scan, $('#posDrop'), add);
   const drawShop = () => {
     const s = POS.shop;
-    $('#posShop').innerHTML = s ? `<div class="card" style="background:var(--soft);padding:10px"><b>${esc(s.name)}</b> ${segPill(s.segment)}<div class="small">${esc(s.city || '')} · ${esc(L(PT.find((t) => t.id === s.price_type_id)?.name))}</div>
+    $('#posShop').innerHTML = s ? `<div class="card" style="background:var(--soft);padding:10px"><b>${esc(s.name)}</b> ${segPill(s.segment)}<div class="small">${esc(s.city || '')}${Number(s.discount_pct) ? ` · скидка <b>${Number(s.discount_pct)}%</b>` : ''}</div>
         <div class="small">Долг: <b>${money(s.balance)}</b> из ${money(s.credit_limit)} · Бонусы: <b>${money(s.bonus_balance)}</b></div><button class="btn sm ghost" id="posNoShop" style="margin-top:6px">Розничный покупатель</button></div>`
       : `<div class="bar" style="margin:0;position:relative"><input id="posShopQ" class="grow" placeholder="Розница · найти клиента: имя / телефон"><div id="posShopDrop" style="position:absolute;top:44px;left:0;right:0;z-index:6"></div></div>`;
     if (s) $('#posNoShop').onclick = () => { POS.shop = null; POS.bonus = 0; savePos(); drawShop(); draw(); };
@@ -1745,7 +1733,7 @@ async function openPurchase(id, supplierId, preset) {
     <div class="cols"><label class="f">Поставщик<div class="bar" style="margin:0"><select id="puS" class="grow" ${posted ? 'disabled' : ''}><option value="">— без поставщика —</option>${sups.map((s) => `<option value="${s.id}" ${s.id === pu.supplier_id ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select>${posted ? '' : '<button type="button" class="btn sm ghost" id="puSNew">+</button>'}</div></label>
       <label class="f">Комментарий<input id="puN" value="${esc(pu.note || '')}" ${posted ? 'disabled' : ''}></label></div>
     ${posted ? '' : `<div class="bar" style="margin:0;position:relative"><div style="position:relative;flex:1"><input id="puScan" placeholder="Сканируйте или найдите товар" style="width:100%;height:48px;font-size:17px" autocomplete="off"><div id="puDrop"></div></div>
-      <label class="btn ghost" style="cursor:pointer">📄 Из Excel<input type="file" id="puX" accept=".xlsx,.xls,.csv" hidden></label><button class="btn ghost" id="puNewP" type="button">+ Новый товар</button></div>`}
+      <label class="btn ghost" style="cursor:pointer">📄 Из Excel<input type="file" id="puX" accept=".xlsx,.xls,.csv" hidden></label><button class="btn ghost" id="puTpl" type="button" title="Excel-шаблон прихода">⬇ Шаблон</button><button class="btn ghost" id="puNewP" type="button">+ Новый товар</button></div>`}
     <div class="tbl-wrap"><table><thead><tr><th>Товар</th><th class="num">Остаток</th><th style="width:110px">Кол-во</th><th style="width:130px">Цена закупки</th><th class="num">Себест. сейчас</th><th class="num">Сумма</th><th></th></tr></thead><tbody id="puRows"></tbody></table></div>
     <div id="puTot" style="text-align:right;font-size:18px"></div>
     <div class="bar" style="margin:0;justify-content:space-between"><div class="bar" style="margin:0">${id ? '<button class="btn ghost" id="puLbl">🏷 Стикеры на приход</button><button class="btn ghost" id="puPrint">🖨 Печать</button>' : ''}${id && !posted ? '<button class="btn danger" id="puDel">Удалить</button>' : ''}</div>
@@ -1771,24 +1759,14 @@ async function openPurchase(id, supplierId, preset) {
       setTimeout(() => $('#puScan', el).focus(), 50);
       $('#puSNew', el).onclick = () => { const keep = { items, supplier: null }; close(); editSupplier(null, (s) => openPurchase(id, s.id, keep.items)); };
       $('#puNewP', el).onclick = () => quickProduct((p) => add(p));
+      $('#puTpl', el).onclick = () => purchaseTemplate();
       $('#puX', el).onchange = async (e) => {
         const f = e.target.files[0]; if (!f) return; e.target.value = '';
-        const wb = XLSX.read(await f.arrayBuffer()); const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
-        if (!rows.length) return toast('Файл пустой', true);
-        const keys = Object.keys(rows[0]); const g = (re) => keys.find((k) => re.test(k.toLowerCase()));
-        const kB = g(/штрих|barcode|ean|shtrix/), kS = g(/артик|sku|код|kod/), kN = g(/наимен|назв|товар|name|nomi/), kQ = g(/кол|qty|soni|миқ|шт/), kC = g(/цен|закуп|себест|cost|price|narx/);
-        if (!kQ) return toast('Не найдена колонка «Количество»', true);
-        let ok = 0; const miss = [];
-        const num = (v) => Number(String(v).replace(/\s/g, '').replace(',', '.')) || 0;
-        for (const r of rows) {
-          const qty = Math.round(num(r[kQ])); if (qty <= 0) continue;
-          const code = String((kB && r[kB]) || (kS && r[kS]) || '').trim();
-          let p = code ? await findByCode(code) : null;
-          if (!p && kN && r[kN]) { const s = await searchProducts(String(r[kN]).trim(), 2); if (s.length === 1) p = s[0]; }
-          if (p) { await add(p, qty, kC ? num(r[kC]) : null); ok++; } else miss.push(String(r[kN] || code));
-        }
-        toast(`Загружено позиций: ${ok}${miss.length ? `. Не найдено: ${miss.length} — создайте их через «+ Новый товар»` : ''}`, !!miss.length);
-        if (miss.length) $('#puTot', el).insertAdjacentHTML('afterend', `<div class="card small" style="background:var(--warnSoft)"><b>Не найдены в базе:</b> ${miss.slice(0, 40).map(esc).join('; ')}${miss.length > 40 ? '…' : ''}</div>`);
+        const res = await importPurchaseRows(f, add);
+        if (!res) return;
+        toast(`Загружено позиций: ${res.ok}${res.created ? `, из них новых товаров: ${res.created}` : ''}${res.priced ? `, цен продажи обновлено: ${res.priced}` : ''}${res.errors.length ? `. Ошибок: ${res.errors.length}` : ''}`, !!res.errors.length);
+        el.querySelector('#puErr')?.remove();
+        if (res.errors.length) $('#puTot', el).insertAdjacentHTML('afterend', `<div id="puErr" class="card small" style="background:var(--warnSoft)"><b>Строки с ошибками (не загружены):</b><br>${res.errors.slice(0, 40).map(esc).join('<br>')}${res.errors.length > 40 ? '<br>…' : ''}</div>`);
       };
       const save = async () => {
         const row = { supplier_id: $('#puS', el).value || null, note: $('#puN', el).value || null, total: items.reduce((a, x) => a + x.qty * x.cost, 0) };
@@ -1820,11 +1798,74 @@ async function openPurchase(id, supplierId, preset) {
   });
 }
 /* fast product creation from purchase / labels */
+/* ---------- Excel template + import for purchases (приход) ---------- */
+const PU_COLS = [
+  ['Наименование *', 'обязательно', 'Название товара. Если товара нет в базе — он будет создан.'],
+  ['Количество *', 'обязательно', 'Сколько штук пришло. Целое число больше 0.'],
+  ['Цена закупки *', 'обязательно', 'Цена за 1 шт у поставщика, сом. Из неё считается себестоимость.'],
+  ['Артикул', 'по желанию', 'Ваш код товара. По нему (или штрихкоду) находим товар в базе.'],
+  ['Штрихкод', 'по желанию', 'EAN-13 и т.п. Если пусто у нового товара — штрихкод создастся сам.'],
+  ['Цена продажи', 'по желанию', 'Новая цена продажи за 1 шт. Если указана — цена в базе обновится.'],
+  ['Категория', 'по желанию', 'Для новых товаров: название категории как в панели. Если пусто — первая категория.'],
+  ['Мин. остаток', 'по желанию', 'Когда остаток станет меньше — придёт сигнал «заканчивается».'],
+];
+function purchaseTemplate() {
+  const head = PU_COLS.map((c) => c[0]);
+  const ex = [['Кабель Type-C 1м белый', 50, 95, 'CAB-TC-1W', '', 150, 'USB кабели', 20], ['Power bank 10000 mAh', 10, 620, '', '6971234567890', 850, '', 5]];
+  const ws = XLSX.utils.aoa_to_sheet([head, ...ex]);
+  ws['!cols'] = head.map((h) => ({ wch: Math.max(14, h.length + 4) }));
+  const info = XLSX.utils.aoa_to_sheet([['Колонка', 'Обязательна?', 'Что писать'], ...PU_COLS, [], ['Как загрузить:', '', 'Касса → Приход → Новый приход → «Из Excel». Первая строка — заголовки, их не меняйте. Примеры можно удалить.']]);
+  info['!cols'] = [{ wch: 18 }, { wch: 14 }, { wch: 90 }];
+  const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Приход'); XLSX.utils.book_append_sheet(wb, info, 'Инструкция');
+  XLSX.writeFile(wb, 'prihod-shablon.xlsx');
+}
+async function importPurchaseRows(file, add) {
+  const wb = XLSX.read(await file.arrayBuffer()); const rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { defval: '' });
+  if (!rows.length) { toast('Файл пустой', true); return null; }
+  const keys = Object.keys(rows[0]); const g = (re) => keys.find((k) => re.test(k.toLowerCase().replace(/\*/g, '').trim()));
+  const kN = g(/наимен|назв|товар|^name|nomi/), kQ = g(/^кол|qty|soni|миқ|^шт/), kC = g(/закуп|себест|cost|kirim/) || g(/^цена$|^narx$|^price$/),
+    kS = g(/артик|sku|^код|kod/), kB = g(/штрих|barcode|ean|shtrix/), kP = g(/продаж|sotuv|sale|розн/), kK = g(/катег|categ|turkum/), kM = g(/мин/);
+  const missCols = [[kN, 'Наименование'], [kQ, 'Количество'], [kC, 'Цена закупки']].filter((x) => !x[0]).map((x) => x[1]);
+  if (missCols.length) { toast(`В файле нет обязательных колонок: ${missCols.join(', ')}. Скачайте шаблон (⬇ Шаблон).`, true); return null; }
+  const num = (v) => Number(String(v).replace(/\s/g, '').replace(',', '.'));
+  const catBy = (name) => { const n = String(name || '').trim().toLowerCase(); return (n && CATS.find((c) => [c.name?.ru, c.name?.uz, c.name?.ky].some((x) => String(x || '').toLowerCase() === n))) || CATS[0]; };
+  const res = { ok: 0, created: 0, priced: 0, errors: [] };
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i], line = i + 2, name = String(r[kN] || '').trim(), qty = num(r[kQ]), cost = num(r[kC]);
+    if (!name && !r[kQ] && !r[kC]) continue; // empty row
+    if (!name) { res.errors.push(`Строка ${line}: нет названия`); continue; }
+    if (!Number.isFinite(qty) || qty <= 0 || Math.round(qty) !== qty) { res.errors.push(`Строка ${line} (${name}): количество «${r[kQ]}» — нужно целое число > 0`); continue; }
+    if (!Number.isFinite(cost) || cost < 0 || String(r[kC]).trim() === '') { res.errors.push(`Строка ${line} (${name}): цена закупки «${r[kC]}» — нужно число`); continue; }
+    const code = String((kB && r[kB]) || '').trim() || String((kS && r[kS]) || '').trim();
+    let p = code ? await findByCode(code) : null;
+    if (!p) { const s = await searchProducts(name, 3); p = s.find((x) => L(x.name).trim().toLowerCase() === name.toLowerCase()) || null; }
+    const sale = kP && String(r[kP]).trim() !== '' ? num(r[kP]) : null;
+    if (sale != null && (!Number.isFinite(sale) || sale < 0)) { res.errors.push(`Строка ${line} (${name}): цена продажи «${r[kP]}» — нужно число`); continue; }
+    try {
+      if (!p) {
+        const cat = catBy(kK && r[kK]); const t = tplOf(cat?.id);
+        const bc = String((kB && r[kB]) || '').trim() || await nextBarcode();
+        const ins = await sb.from('products').insert({ name: { ru: name, uz: name, ky: name }, description: t.desc || {}, sku: String((kS && r[kS]) || '').trim() || null, barcode: bc, category_id: cat?.id || null,
+          brand: t.brand || null, stock: 0, min_qty: t.min_qty || 1, pack_qty: t.pack_qty || 1, min_stock: kM && r[kM] !== '' ? Math.max(0, Math.round(num(r[kM])) || 0) : 5, is_new: true, is_active: !!sale }).select('id').single();
+        if (ins.error) { res.errors.push(`Строка ${line} (${name}): ${ins.error.message.includes('sku') ? 'такой артикул уже есть у другого товара' : ins.error.message}`); continue; }
+        p = await q(sb.from('products').select(PSEL).eq('id', ins.data.id).single()); res.created++;
+      } else if (kM && String(r[kM]).trim() !== '') await sb.from('products').update({ min_stock: Math.max(0, Math.round(num(r[kM])) || 0) }).eq('id', p.id);
+      if (sale != null && sale > 0) {
+        await q(sb.from('product_prices').delete().eq('product_id', p.id));
+        await q(sb.from('product_prices').insert(priceGrid(sale).map((x) => ({ ...x, product_id: p.id }))));
+        p.product_prices = priceGrid(sale); res.priced++;
+      }
+      await add(p, qty, cost); res.ok++;
+    } catch (e) { res.errors.push(`Строка ${line} (${name}): ${e.message || e}`); }
+  }
+  return res;
+}
+
 function quickProduct(onCreated) {
   modal(`<div class="head"><h2>Новый товар</h2><button class="x" data-close aria-label="Закрыть">×</button></div>
     <form id="qp" class="cols"><label class="f">Название *<input name="ru" required></label><label class="f">Категория<select name="cat">${CATS.map((c) => `<option value="${c.id}">${esc(L(c.name))}</option>`).join('')}</select></label>
     <label class="f">Артикул<input name="sku"></label><label class="f">Штрихкод <span class="muted">(пусто — создадим)</span><input name="barcode"></label>
-    <label class="f">Цена «Опт» от 1 шт<input name="price" type="number" min="0"></label><label class="f">Цена «Розница»<input name="retail" type="number" min="0"></label></form>
+    <label class="f">Цена, с<input name="price" type="number" min="0"></label></form>
     <div class="small muted">Остальные цены заполнятся по шаблону категории. Фото и описание добавьте потом в «Товары».</div>
     <div class="bar" style="margin:0;justify-content:flex-end"><button class="btn ghost" data-close>Отмена</button><button class="btn" id="qpGo">Создать</button></div>`, (el, close) => {
     $('#qpGo', el).onclick = async () => {
@@ -1833,7 +1874,6 @@ function quickProduct(onCreated) {
       const r = await sb.from('products').insert({ name: { ru: f.ru.trim(), uz: f.ru.trim(), ky: f.ru.trim() }, sku: f.sku.trim() || null, barcode: bc, category_id: f.cat, stock: 0, min_qty: t.min_qty || 1, pack_qty: t.pack_qty || 1, brand: t.brand || null, is_new: true, is_active: Number(f.price) > 0 }).select('id').single();
       if (r.error) return toast(r.error.message.includes('sku') ? 'Такой артикул уже есть' : r.error.message, true);
       const prices = Number(f.price) > 0 ? priceGrid(Number(f.price), t) : [];
-      if (Number(f.retail) > 0) { const i = prices.findIndex((x) => x.price_type_id === 4 && x.min_qty === 1); i >= 0 ? prices[i].price = Number(f.retail) : prices.push({ price_type_id: 4, min_qty: 1, price: Number(f.retail) }); }
       if (prices.length) await q(sb.from('product_prices').insert(prices.map((x) => ({ ...x, product_id: r.data.id }))));
       const p = await q(sb.from('products').select(PSEL).eq('id', r.data.id).single());
       close(); toast('Товар создан'); onCreated(p);
@@ -1858,7 +1898,7 @@ VIEWS.labels = async () => {
       <div style="position:relative" class="grow"><input id="lQ" placeholder="Найти / сканировать товар" style="width:100%"><div id="lDrop"></div></div></div>
     <div class="card cols" style="margin-bottom:12px">
       <label class="f">Размер стикера<select id="lSize">${Object.keys(LBL_SIZES).map((k) => `<option ${LBL.size === k ? 'selected' : ''}>${k}</option>`).join('')}</select></label>
-      <label class="f">Цена на стикере<select id="lPrice"><option value="0">без цены</option>${PT.map((t) => `<option value="${t.id}" ${LBL.price === t.id ? 'selected' : ''}>${esc(L(t.name))}</option>`).join('')}</select></label>
+      <label class="f">Цена на стикере<select id="lPrice"><option value="0">без цены</option><option value="1" ${LBL.price ? 'selected' : ''}>с ценой</option></select></label>
       <label class="f">&nbsp;<label class="chip"><input type="checkbox" id="lSku" ${LBL.showSku ? 'checked' : ''}> артикул</label></label>
       <div style="align-self:end" class="bar"><button class="btn dark" id="lGen">Создать штрихкоды выбранным</button><button class="btn" id="lPrint">🖨 Печать</button></div></div>
     <div class="tbl-wrap"><table><thead><tr><th><input type="checkbox" id="lAll" aria-label="выбрать все"></th><th>Товар</th><th>Штрихкод</th><th class="num">Остаток</th><th style="width:120px">Стикеров</th></tr></thead><tbody id="lRows"></tbody></table></div>`;
@@ -1892,7 +1932,7 @@ async function labelsFor(items, genMissing) {
 }
 function printLabels(items) {
   const [w, h] = LBL_SIZES[LBL.size] || [58, 40]; const small = h <= 25;
-  const price = (p) => LBL.price ? unitPriceOf(p, LBL.price, 1) : null;
+  const price = (p) => LBL.price ? unitPriceOf(p) : null;
   const one = (p, k) => `<div class="lb"><div class="nm">${esc(L(p.name))}</div>${LBL.showSku && p.sku && !small ? `<div class="sk">${esc(p.sku)}</div>` : ''}
     ${p.barcode ? `<svg class="bc" id="b${k}" data-c="${esc(p.barcode)}"></svg>` : '<div class="sk">нет штрихкода</div>'}${price(p) != null ? `<div class="pr">${money(price(p))}</div>` : ''}</div>`;
   let k = 0; const body = items.flatMap((x) => Array.from({ length: x.n }, () => one(x.p, k++))).join('');
@@ -2025,7 +2065,7 @@ VIEWS.profit = async () => {
       ${k('Чеков в магазине', r.pos_count)}${k('Оптовых заказов', r.opt_count)}</div>
     <h2 style="margin-top:20px">Состояние бизнеса сейчас</h2>
     <div class="grid">${(r.cash || []).map((c) => k(esc(c.name), money(c.balance))).join('')}${k('Нам должны клиенты', money(r.receivables))}${k('Мы должны поставщикам', money(r.payables))}
-      ${k('Товар на складе (по себест.)', money(r.stock_value), '', `по опт. цене ${money(r.stock_retail)}`)}</div>
+      ${k('Товар на складе (по себест.)', money(r.stock_value), '', `по цене продажи ${money(r.stock_retail)}`)}</div>
     ${(r.by_day || []).length > 1 ? `<div class="card" style="margin-top:14px"><h3>Выручка и прибыль по дням</h3><div class="chart">${r.by_day.map((x) => `<div class="col" title="${x.d}: выручка ${money(x.rev)}, прибыль ${money(x.profit)}"><div style="width:100%;max-width:38px;display:flex;flex-direction:column;justify-content:flex-end;height:100%"><div class="bar-v" style="height:${Math.max(2, Number(x.rev) / maxD * 100)}%;position:relative;background:var(--brandSoft)"><div style="position:absolute;bottom:0;left:0;right:0;height:${Number(x.rev) ? Math.max(0, Number(x.profit) / Number(x.rev) * 100) : 0}%;background:var(--brand);border-radius:6px 6px 2px 2px"></div></div></div><span>${x.d.slice(8)}.${x.d.slice(5, 7)}</span></div>`).join('')}</div><div class="small muted">светлое — выручка, оранжевое — прибыль</div></div>` : ''}
     <div class="cols" style="margin-top:14px;align-items:start">
       <div><h3>Самые прибыльные товары</h3><div class="tbl-wrap"><table><thead><tr><th>Товар</th><th class="num">Шт</th><th class="num">Выручка</th><th class="num">Прибыль</th></tr></thead><tbody>${(r.top_profit || []).map((x) => `<tr><td>${esc(x.name)}</td><td class="num">${x.qty}</td><td class="num">${money(x.rev)}</td><td class="num"><b>${money(x.profit)}</b></td></tr>`).join('') || '<tr><td colspan="4" class="empty">Нет продаж</td></tr>'}</tbody></table></div></div>
