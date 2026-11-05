@@ -128,6 +128,7 @@ tbody tr.click{cursor:pointer}tbody tr.click:hover{background:#fafaf8}
 .pill{display:inline-block;font-size:11px;font-weight:800;padding:3px 8px;border-radius:8px;background:var(--soft);color:var(--ink2);white-space:nowrap}
 .p-brand{background:var(--brand);color:#111}.p-ok{background:var(--okSoft);color:var(--ok)}.p-warn{background:var(--warnSoft);color:var(--warn)}.p-danger{background:var(--dangerSoft);color:var(--danger)}.p-info{background:var(--infoSoft);color:var(--info)}
 .thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;background:var(--soft);display:block}
+.vr{margin-top:3px;font-weight:700;color:#C2410C;font-size:13px}
 .muted{color:var(--ink2)}.small{font-size:13px}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chip{height:34px;padding:0 12px;border-radius:9px;border:1px solid var(--line);background:#fff;cursor:pointer;font-weight:600;font-size:13px}
@@ -212,6 +213,16 @@ const $ = (s, el = document) => el.querySelector(s);
 const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 const money = (v) => Math.round(Number(v || 0)).toLocaleString('ru-RU').replace(/,/g, ' ') + ' с';
 const dt = (v) => new Date(v).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+/** "Чёрный | #151515 | 1" lines → [{key,name:{ru,uz,ky},hex,img}] (keeps existing translations for the same name) */
+function parseColors(text, old) {
+  return text.split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((a) => a[0]).map(([nm, hex, ph]) => {
+    const prev = old.find((c) => (c.name?.ru || c.key) === nm);
+    const h = /^#?[0-9a-f]{6}$/i.test(hex || '') ? (hex.startsWith('#') ? hex : '#' + hex) : (prev?.hex || '#999999');
+    const c = { key: prev?.key || nm.toLowerCase().replace(/[^a-zа-я0-9]+/gi, '-'), name: prev?.name || { ru: nm, uz: nm, ky: nm }, hex: h };
+    if (Number(ph) > 0) c.img = Number(ph) - 1;
+    return c;
+  });
+}
 const img = (u) => !u ? '' : u.startsWith('demo:') ? (DEMO[u.slice(5)] || '') : /^https?:/.test(u) ? u : PUB + u;
 const L = (o) => (o && (o.ru || o.uz || o.ky)) || '';
 const digits = (s) => String(s || '').replace(/\D/g, '');
@@ -477,7 +488,7 @@ VIEWS.orders = async () => {
 };
 
 async function loadOrder(id) {
-  return q(sb.from('orders').select('*, order_items(id,order_id,product_id,sku,name,image_url,qty,price,sum,picked_qty,checked,products(barcode,stock,category_id)), shops(name,city,phone,address,owner_name,segment)').eq('id', id).single());
+  return q(sb.from('orders').select('*, order_items(id,order_id,product_id,sku,name,image_url,qty,price,sum,picked_qty,checked,color,model,products(barcode,stock,category_id)), shops(name,city,phone,address,owner_name,segment)').eq('id', id).single());
 }
 async function staffNames(ids) {
   ids = ids.filter(Boolean); if (!ids.length) return {};
@@ -505,7 +516,7 @@ async function openOrder(id) {
     ${o.comment ? `<div class="card" style="background:var(--soft)"><b>Комментарий клиента:</b> ${esc(o.comment)}</div>` : ''}
     ${o.shops?.segment === 'blacklist' ? '<div class="card" style="background:var(--dangerSoft);color:var(--danger)"><b>Клиент в чёрном списке.</b></div>' : ''}
     <div class="tbl-wrap"><table><thead><tr><th></th><th>Товар</th><th>Арт.</th><th class="num">Заказано</th><th class="num">Собрано</th><th class="num">Цена</th><th class="num">Сумма</th></tr></thead><tbody>
-      ${o.order_items.map((it) => `<tr><td><img class="thumb" src="${img(it.image_url)}" alt=""></td><td>${esc(L(it.name))}</td><td class="small">${esc(it.sku)}</td><td class="num"><b>${it.qty}</b></td>
+      ${o.order_items.map((it) => `<tr><td><img class="thumb" src="${img(it.image_url)}" alt=""></td><td>${esc(L(it.name))}${it.color || it.model ? `<div class="vr">${esc([it.color, it.model].filter(Boolean).join(' · '))}</div>` : ''}</td><td class="small">${esc(it.sku)}</td><td class="num"><b>${it.qty}</b></td>
         <td class="num">${it.picked_qty == null ? '—' : it.picked_qty < it.qty ? `<span class="pill p-danger">${it.picked_qty}</span>` : `<span class="pill p-ok">${it.picked_qty}</span>`}</td><td class="num">${money(it.price)}</td><td class="num">${money(it.sum)}</td></tr>`).join('')}
       <tr><td colspan="6"><b>Итого</b>${o.ordered_total && Number(o.ordered_total) !== Number(o.total) ? ` <span class="small muted">(заказано на ${money(o.ordered_total)}, недовложение ${money(o.total - o.ordered_total)})</span>` : ''}</td><td class="num"><b>${money(o.total)}</b></td></tr>
     </tbody></table></div>
@@ -570,7 +581,7 @@ async function openPicking(id) {
     const draw = () => {
       $('#pk', el).innerHTML = items.map((it) => {
         const v = st[it.id], ok = v >= it.qty, part = v > 0 && v < it.qty;
-        return `<tr style="background:${ok ? 'var(--okSoft)' : part ? 'var(--warnSoft)' : 'transparent'}"><td><img class="thumb" src="${img(it.image_url)}" alt=""></td><td><b>${esc(L(it.name))}</b></td>
+        return `<tr style="background:${ok ? 'var(--okSoft)' : part ? 'var(--warnSoft)' : 'transparent'}"><td><img class="thumb" src="${img(it.image_url)}" alt=""></td><td><b>${esc(L(it.name))}</b>${it.color || it.model ? `<div class="vr">${esc([it.color, it.model].filter(Boolean).join(' · '))}</div>` : ''}</td>
           <td class="small">${esc(it.sku)}<div class="muted">${esc(it.products?.barcode)}</div></td><td class="num"><b style="font-size:18px">${it.qty}</b></td>
           <td><div class="qty"><button type="button" class="btn sm ghost" data-m="${it.id}" aria-label="минус">−</button><input type="number" min="0" max="${it.qty}" value="${v}" data-v="${it.id}"><button type="button" class="btn sm ghost" data-p="${it.id}" aria-label="плюс">+</button></div></td>
           <td>${ok ? '✅' : part ? '⚠️' : ''}</td></tr>`;
@@ -586,10 +597,11 @@ async function openPicking(id) {
     scan.onkeydown = (e) => {
       if (e.key !== 'Enter') return;
       const code = scan.value.trim(); scan.value = ''; if (!code) return;
-      const it = items.find((x) => x.products?.barcode === code || String(x.sku).toLowerCase() === code.toLowerCase());
+      const match = (x) => x.products?.barcode === code || String(x.sku).toLowerCase() === code.toLowerCase();
+      const it = items.find((x) => match(x) && st[x.id] < x.qty) || items.find(match); // first unfinished color/model line
       if (!it) { beep(); return toast('Этого товара нет в заказе: ' + code, true); }
       if (st[it.id] >= it.qty) { beep(); return toast('Уже собрано полностью: ' + L(it.name), true); }
-      st[it.id] += 1; save(it.id); toast(`${L(it.name)}: ${st[it.id]} из ${it.qty}`);
+      st[it.id] += 1; save(it.id); toast(`${L(it.name)}${it.color || it.model ? ' (' + [it.color, it.model].filter(Boolean).join(' · ') + ')' : ''}: ${st[it.id]} из ${it.qty}`);
     };
     $('#allBtn', el).onclick = async () => { for (const it of items) { st[it.id] = it.qty; await sb.rpc('pick_item', { p_item: it.id, p_qty: it.qty }); } draw(); };
     $('#pList', el).onclick = () => printPickList(o);
@@ -653,7 +665,7 @@ async function printInvoice(o, names = {}) {
     <div class="box"><b>Поставщик:</b> ${esc(c.name || 'IZZAT AKSESSUAR')}<br><b>Получатель:</b> ${esc(o.shops?.name)}${o.shops?.owner_name ? ' (' + esc(o.shops.owner_name) + ')' : ''}, ${esc(o.shops?.city || '')}, тел. ${esc(o.shops?.phone || '')}
       <br><b>Получение:</b> ${o.delivery_method === 'pickup' ? 'самовывоз со склада' : 'доставка: ' + esc(o.address || '')} &nbsp; <b>Оплата:</b> ${o.payment_method === 'credit' ? 'в долг (насия)' : 'перевод'}</div>
     <table><thead><tr><th class="c">№</th><th>Артикул</th><th>Наименование</th><th class="r">Кол-во</th><th class="r">Цена, с</th><th class="r">Сумма, с</th></tr></thead><tbody>
-    ${items.map((it, k) => `<tr><td class="c">${k + 1}</td><td>${esc(it.sku)}</td><td>${esc(L(it.name))}</td><td class="r">${qtyOf(it)} шт</td><td class="r">${money(it.price).replace(' с', '')}</td><td class="r">${money(it.price * qtyOf(it)).replace(' с', '')}</td></tr>`).join('')}
+    ${items.map((it, k) => `<tr><td class="c">${k + 1}</td><td>${esc(it.sku)}</td><td>${esc(L(it.name))}${it.color || it.model ? `<div class="vr">${esc([it.color, it.model].filter(Boolean).join(' · '))}</div>` : ''}</td><td class="r">${qtyOf(it)} шт</td><td class="r">${money(it.price).replace(' с', '')}</td><td class="r">${money(it.price * qtyOf(it)).replace(' с', '')}</td></tr>`).join('')}
     <tr><td colspan="3"><b>Итого: ${items.length} наименований, ${units} шт</b></td><td></td><td></td><td class="r"><b>${money(total).replace(' с', '')}</b></td></tr></tbody></table>
     <p>Сумма прописью: <b>${numWords(total)} сом 00 тыйын</b></p>
     ${o.picked_at ? '' : '<p><i>Заказ ещё не собран — количество может измениться после сборки.</i></p>'}
@@ -667,7 +679,7 @@ function printPickList(o) {
     <div class="head"><div><h1>ЛИСТ СБОРКИ — заказ № ${o.number}</h1><div>${new Date(o.created_at).toLocaleString('ru-RU')}</div></div><div style="text-align:right"><b>${esc(o.shops?.name)}</b><br>${esc(o.shops?.city || '')} · ${o.delivery_method === 'pickup' ? 'Самовывоз' : 'Доставка'}</div></div>
     ${o.comment ? `<div class="box"><b>Комментарий клиента:</b> ${esc(o.comment)}</div>` : ''}${o.staff_note ? `<div class="box"><b>Заметка:</b> ${esc(o.staff_note)}</div>` : ''}
     <table><thead><tr><th class="c">✓</th><th>Артикул</th><th>Штрихкод</th><th>Наименование</th><th class="r">Нужно</th><th class="r">Собрано</th></tr></thead><tbody>
-    ${items.map((it) => `<tr><td class="c"><span class="chk"></span></td><td>${esc(it.sku)}</td><td>${esc(it.products?.barcode || '')}</td><td>${esc(L(it.name))}</td><td class="r"><b style="font-size:16px">${it.qty}</b></td><td style="width:80px"></td></tr>`).join('')}
+    ${items.map((it) => `<tr><td class="c"><span class="chk"></span></td><td>${esc(it.sku)}</td><td>${esc(it.products?.barcode || '')}</td><td>${esc(L(it.name))}${it.color || it.model ? `<div class="vr">${esc([it.color, it.model].filter(Boolean).join(' · '))}</div>` : ''}</td><td class="r"><b style="font-size:16px">${it.qty}</b></td><td style="width:80px"></td></tr>`).join('')}
     </tbody></table><p>Всего позиций: <b>${items.length}</b>, штук: <b>${items.reduce((a, it) => a + it.qty, 0)}</b></p>
     <div class="sign"><div>Собрал (подпись)</div><div>Проверил (подпись)</div></div>`);
 }
@@ -956,7 +968,9 @@ async function openProduct(id, catId, copyFrom) {
     <label class="f">В упаковке, шт<input name="pack_qty" type="number" min="1" value="${p.pack_qty}"></label>
     <label class="f">Сортировка<input name="sort" type="number" value="${p.sort}"></label>
     <label class="f">Метки<span class="chips"><label class="chip"><input type="checkbox" name="is_new" ${p.is_new ? 'checked' : ''}> NEW</label><label class="chip"><input type="checkbox" name="is_hit" ${p.is_hit ? 'checked' : ''}> HIT</label><label class="chip"><input type="checkbox" name="is_active" ${p.is_active ? 'checked' : ''}> В продаже</label></span></label>
-    <label class="f" style="grid-column:1/-1">Подходит для моделей (через запятую)<input name="models" value="${esc((p.compatible_models || []).join(', '))}" placeholder="iPhone 13, iPhone 14"></label>
+    <label class="f" style="grid-column:1/-1">Подходит для моделей (через запятую) — для чехлов и стёкол<input name="models" value="${esc((p.compatible_models || []).join(', '))}" placeholder="iPhone 15 Pro, Samsung Galaxy S25, Redmi Note 14"></label>
+    <label class="f" style="grid-column:1/-1">Цвета (каждый с новой строки: Название | #цвет | № фото)
+      <textarea name="colors" rows="3" placeholder="Чёрный | #151515 | 1&#10;Синий | #24448A | 2">${esc((p.colors || []).map((c) => [c.name?.ru || c.key, c.hex, c.img != null ? c.img + 1 : ''].join(' | ').replace(/ \| $/, '')).join('\n'))}</textarea></label>
     <label class="f" style="grid-column:1/-1">Описание (RU)<textarea name="d_ru" rows="2">${esc(p.description?.ru)}</textarea></label>
     <label class="f">Tavsif (UZ)<textarea name="d_uz" rows="2">${esc(p.description?.uz)}</textarea></label>
     <label class="f">Сүрөттөмө (KY)<textarea name="d_ky" rows="2">${esc(p.description?.ky)}</textarea></label>
@@ -1005,6 +1019,7 @@ async function openProduct(id, catId, copyFrom) {
         stock: Number(f.get('stock') || 0), min_stock: Math.max(0, Number(f.get('min_stock') || 0)), min_qty: Math.max(1, Number(f.get('min_qty') || 1)), pack_qty: Math.max(1, Number(f.get('pack_qty') || 1)),
         sort: Number(f.get('sort') || 0), is_new: !!f.get('is_new'), is_hit: !!f.get('is_hit'), is_active: active,
         compatible_models: String(f.get('models') || '').split(',').map((s) => s.trim()).filter(Boolean),
+        colors: parseColors(String(f.get('colors') || ''), p.colors || []),
       };
       let pid = id;
       if (id) await q(sb.from('products').update(row).eq('id', id));
